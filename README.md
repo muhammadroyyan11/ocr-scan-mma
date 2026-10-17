@@ -106,9 +106,12 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
 ## Alur Pemakaian
 
 1. Buat sesi penerimaan; supplier, referensi, kode gudang, dan catatan opsional.
-2. Pilih **Mulai kamera**, izinkan akses, lalu pilih **Otomatis**, **LOT**, **MG / MFG** (tanggal produksi),
-   atau **Expired Date** langsung di tampilan kamera. Pilihan wajib sebelum **Ambil foto** aktif.
-   Arahkan ke tulisan yang dipilih, ambil foto, lalu tekan **Baca LOT / MG / MFG / Expired Date**.
+2. Pilih **Mulai kamera**, izinkan akses, arahkan ke label, lalu tekan **OCR otomatis**.
+   Tombol aktif setelah preview kamera siap; satu klik mengambil foto dan membaca LOT/MG/ED sekaligus.
+   Tidak perlu menekan **Ambil foto** terlebih dahulu. Tanpa pilihan jenis, pembacaan memakai mode Otomatis.
+   Untuk satu field, pilih **LOT**, **MG / MFG** (tanggal produksi), atau **Expired Date** di kamera,
+   lalu tekan **Baca LOT / MG / MFG / Expired Date** untuk langsung memotret dan membaca field tersebut.
+   **Ambil foto** tetap tersedia jika ingin memeriksa foto sebelum menjalankan OCR; tombol ini memerlukan pilihan jenis.
    Mode **Otomatis** mengenali penanda LOT/BATCH, MG/MFG/MFD, serta ED/EXP dan mengisi field masing-masing.
    Tanggal valid langsung mengisi input kalender MG dan ED; teks asli tersimpan di bagian yang dapat dibuka.
    Mode satu field hanya mengisi field yang dipilih dan menambah riwayat area.

@@ -6,7 +6,7 @@
 <div id="scanner" class="scanner-grid" data-session-id="{{ $session->id }}">
 <div class="scanner-left">
 <section class="panel scanner-panel"><div class="panel-heading"><h2>@include('partials.icon', ['name' => 'camera']) Kamera & foto label</h2><span id="ocr-status" class="badge" role="status" aria-live="polite">Idle</span></div>
-<p class="muted camera-explanation">Izinkan kamera untuk memotret label. Kamera hanya aktif setelah Anda menekan Mulai kamera. Foto tidak diunggah.</p>
+<p class="muted camera-explanation">Tekan Mulai kamera, izinkan akses, lalu tekan OCR otomatis untuk langsung memotret dan membaca label. Foto tidak diunggah.</p>
 <div class="camera-stage">
 <div id="camera-placeholder" class="camera-placeholder"><span class="viewfinder">@include('partials.icon', ['name' => 'scan'])</span><strong>Siapkan label produk Anda</strong><p>Gunakan kamera atau pilih foto dari perangkat.</p><span class="stage-tag">LOT &nbsp; / &nbsp; MFG &nbsp; / &nbsp; EXP</span></div>
 <video id="camera-video" autoplay muted playsinline hidden></video>

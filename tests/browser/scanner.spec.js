@@ -235,6 +235,62 @@ test('camera field selection routes OCR to LOT, MFG and EXP without clearing pre
     await expect(page.locator('#crop-field')).toHaveValue('AUTO');
 });
 
+test('live camera OCR is clickable before a photo and captures the current preview on retake', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize(canvas) { window.ocrCalls = (window.ocrCalls || 0) + 1; window.ocrImageWidth = canvas.width; return { text: "LOT: LIVE" + window.ocrCalls + "\\nMFG: 11 aug 2026\\nEXP: 11 aug 2027", confidence: 95 }; } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-LIVE-OCR-${Date.now()}`);
+    await expect(page.locator('#auto-ocr')).toBeDisabled();
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await expect(page.locator('#image-workspace')).toBeHidden();
+    await page.evaluate(() => { window.testStream = document.querySelector('video').srcObject; });
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('LIVE1');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2026-08-11');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-08-11');
+    await expect(page.locator('#image-workspace')).toBeVisible();
+    expect(await page.evaluate(() => window.testStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
+    expect(await page.evaluate(() => document.querySelector('video').srcObject)).toBeNull();
+    await labelImage(page);
+    await page.locator('#retake').click();
+    await page.locator('#camera-field-picker label').filter({ hasText: /^LOT$/ }).click();
+    await expect(page.locator('#auto-ocr')).toContainText('Baca LOT');
+    const videoWidth = await page.locator('#camera-video').evaluate(video => video.videoWidth);
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('LIVE2');
+    expect(await page.evaluate(() => window.ocrCalls)).toBe(2);
+    expect(await page.evaluate(() => window.ocrImageWidth)).toBe(Math.min(videoWidth, 2560));
+});
+
+test('mobile camera labels accept real taps and OCR reads the preview without taking a separate photo', async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return { text: "LOT: TAP123\\nMG: 11 agustus 2026\\nED: 11 aug 2027", confidence: 95 }; } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-TAP-AUTO-${Date.now()}`);
+    await page.locator('#start-camera').tap();
+    await page.locator('#camera-field-picker label').filter({ hasText: /^Otomatis$/ }).tap();
+    await expect(page.getByRole('radio', { name: 'Otomatis', exact: true })).toBeChecked();
+    await page.locator('#camera-field-picker label').filter({ hasText: /^LOT$/ }).tap();
+    await expect(page.getByRole('radio', { name: 'LOT', exact: true })).toBeChecked();
+    await page.locator('#camera-field-picker label').filter({ hasText: /^Otomatis$/ }).tap();
+    await expect(page.getByRole('radio', { name: 'Otomatis', exact: true })).toBeChecked();
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await page.locator('#auto-ocr').tap();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('TAP123');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2026-08-11');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-08-11');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await context.close();
+});
+
 test('automatic camera mode fills LOT and calendar inputs while keeping raw dates collapsed', async ({ page }) => {
     await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
         contentType: 'application/javascript',

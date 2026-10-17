@@ -43,8 +43,11 @@ function initializeScanner() {
 
     function updateControls() {
         const state = camera.state();
+        const video = element('camera-video');
+        const cameraReady = state.running && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
         const busy = processing || cameraLoading || loadingImage || form.busy;
-        for (const id of ['auto-ocr', 'manual-crop', 'retake']) element(id).disabled = !hasImage || busy;
+        for (const id of ['manual-crop', 'retake']) element(id).disabled = !hasImage || busy;
+        element('auto-ocr').disabled = busy || (state.running ? !cameraReady : !hasImage);
         for (const id of ['clear-selection', 'crop-area', 'read-selected']) element(id).disabled = !hasImage || !cropper.selection || busy;
         element('start-camera').disabled = busy || state.running;
         element('stop-camera').disabled = !state.running;
@@ -53,10 +56,11 @@ function initializeScanner() {
         element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
         element('camera-field-picker').hidden = !state.running;
         element('camera-field-picker').querySelectorAll('input').forEach(control => { control.disabled = busy; });
-        element('camera-field-hint').textContent = cameraField === 'AUTO' ? 'Foto seluruh label beserta penanda LOT, MG/MFG, dan ED/EXP. Hasilnya masuk ke field masing-masing; tanggal valid langsung mengisi kalender.' : cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Pilih Otomatis, LOT, MG / MFG, atau Expired Date sebelum mengambil foto.';
-        element('capture-image').disabled = busy || !state.running || !cameraField;
+        element('camera-field-hint').textContent = cameraField === 'AUTO' ? 'Arahkan ke seluruh label, lalu tekan OCR otomatis untuk langsung memotret dan membaca. Hasilnya masuk ke field masing-masing; tanggal valid langsung mengisi kalender.' : cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}, lalu tekan Baca ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Tekan OCR otomatis untuk langsung memotret dan membaca seluruh label, atau pilih LOT, MG / MFG, atau Expired Date untuk satu jenis data.';
+        element('capture-image').disabled = busy || !cameraReady || !cameraField;
         element('capture-image').textContent = cameraField === 'AUTO' ? 'Ambil foto label' : cameraField ? `Ambil foto ${fieldLabels[cameraField]}` : 'Ambil foto';
-        element('auto-ocr').firstChild.textContent = imageField === 'AUTO' ? 'OCR otomatis ' : `Baca ${fieldLabels[imageField]} `;
+        const readField = state.running ? cameraField ?? 'AUTO' : imageField;
+        element('auto-ocr').firstChild.textContent = readField === 'AUTO' ? 'OCR otomatis ' : `Baca ${fieldLabels[readField]} `;
         element('image-file').disabled = busy;
         element('next-item').disabled = busy;
         element('crop-field').disabled = busy;
@@ -66,7 +70,7 @@ function initializeScanner() {
         cropper.enable(hasImage && cropper.enabled && !busy);
     }
 
-    function setImage(canvas, field = 'AUTO') {
+    function setImage(canvas, field = 'AUTO', announce = true) {
         imageField = field;
         element('crop-field').value = field;
         hasImage = true;
@@ -79,7 +83,7 @@ function initializeScanner() {
         element('scanner-error').hidden = true;
         status('Idle');
         updateControls();
-        notify(field === 'AUTO' ? 'Foto siap. Jalankan OCR otomatis atau pilih area tulisan.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]} atau pilih area tulisan.`);
+        if (announce) notify(field === 'AUTO' ? 'Foto siap. Jalankan OCR otomatis atau pilih area tulisan.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]} atau pilih area tulisan.`);
     }
 
     async function startCamera() {
@@ -98,6 +102,7 @@ function initializeScanner() {
     }
 
     element('start-camera').addEventListener('click', startCamera);
+    element('camera-video').addEventListener('loadeddata', updateControls);
     element('camera-field-picker').addEventListener('change', event => {
         if (event.target.name !== 'camera-field' || !fieldLabels[event.target.value]) return;
         cameraField = event.target.value;
@@ -199,7 +204,12 @@ function initializeScanner() {
     }
 
     async function recognize(selected = false) {
-        if (processing || !hasImage || form.busy) return;
+        if (processing || cameraLoading || loadingImage || form.busy) return;
+        if (!selected && camera.state().running) {
+            try { setImage(captureImage(element('camera-video')), cameraField ?? 'AUTO', false); }
+            catch (failure) { showError(failure); return; }
+        }
+        if (!hasImage) return;
         const targeted = selected || imageField !== 'AUTO';
         if (targeted && form.scans.length >= 30) { showError(new Error('Maksimal 30 catatan crop per item. Hapus catatan yang tidak diperlukan.')); return; }
         processing = true;
