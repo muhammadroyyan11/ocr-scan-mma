@@ -177,6 +177,93 @@ test('fake camera capture, stop and retake release all media tracks', async ({ p
     await expect(page.locator('#image-file')).toBeEnabled();
 });
 
+test('camera preview is visible when playback starts', async ({ page }) => {
+    await page.addInitScript(() => {
+        const originalPlay = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function () {
+            if (this.id === 'camera-video' && this.hidden) return Promise.reject(new DOMException('Preview masih disembunyikan.', 'NotAllowedError'));
+            return originalPlay.call(this);
+        };
+    });
+    await login(page);
+    await newSession(page, `E2E-CAMERA-VISIBLE-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await expect(page.locator('#scanner-error')).toBeHidden();
+});
+
+for (const enumeration of ['rejected', 'pending']) test(`camera works when device enumeration is ${enumeration}`, async ({ page }) => {
+    await page.addInitScript(enumeration => {
+        navigator.mediaDevices.enumerateDevices = () => enumeration === 'rejected' ? Promise.reject(new DOMException('Daftar perangkat tidak diizinkan.', 'NotAllowedError')) : new Promise(() => {});
+    }, enumeration);
+    await login(page);
+    await newSession(page, `E2E-CAMERA-ENUM-${enumeration}-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await expect(page.locator('#scanner-error')).toBeHidden();
+    await expect(page.locator('#switch-camera')).toBeDisabled();
+    await page.locator('#stop-camera').click();
+    await expect(page.locator('#camera-placeholder')).toBeVisible();
+});
+
+test('missing OCR dependencies do not disable camera startup', async ({ page }) => {
+    await page.route('**/js/scanner/symbol-label-detector.js', route => route.abort('failed'));
+    await login(page);
+    await newSession(page, `E2E-CAMERA-NO-OCR-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('#scanner-error')).toContainText('Modul OCR gagal dimuat');
+    await expect(page.locator('#start-camera')).toBeEnabled();
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+});
+
+test('pending camera permission can be cancelled without a late stream reopening the preview', async ({ page }) => {
+    await page.addInitScript(() => {
+        const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = constraints => new Promise(resolve => {
+            window.grantCamera = async () => {
+                window.lateStream = await original(constraints);
+                resolve(window.lateStream);
+            };
+        });
+    });
+    await login(page);
+    await newSession(page, `E2E-CAMERA-CANCEL-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-status')).toContainText('izinkan akses');
+    await expect(page.locator('#stop-camera')).toBeEnabled();
+    await page.locator('#stop-camera').click();
+    await page.evaluate(() => window.grantCamera());
+    await expect.poll(() => page.evaluate(() => window.lateStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
+    await expect(page.locator('#camera-video')).toBeHidden();
+    await expect(page.locator('#start-camera')).toBeEnabled();
+});
+
+test('camera permission failure is visible next to controls and can be retried', async ({ page }) => {
+    await page.addInitScript(() => {
+        const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        let firstAttempt = true;
+        navigator.mediaDevices.getUserMedia = constraints => {
+            if (firstAttempt) { firstAttempt = false; return Promise.reject(new DOMException('Ditolak', 'NotAllowedError')); }
+            return original(constraints);
+        };
+    });
+    await login(page);
+    await newSession(page, `E2E-CAMERA-DENIED-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-status')).toContainText('Izin kamera ditolak');
+    await expect(page.locator('#camera-placeholder')).toBeVisible();
+    await expect(page.locator('#start-camera')).toBeEnabled();
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-video')).toBeVisible();
+    await expect(page.locator('#camera-status')).toContainText('Kamera aktif');
+});
+
 test('camera field selection routes OCR to LOT, MFG and EXP without clearing previous scans', async ({ page }) => {
     await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
         contentType: 'application/javascript',

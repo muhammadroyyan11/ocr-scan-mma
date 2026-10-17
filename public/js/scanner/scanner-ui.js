@@ -2,7 +2,6 @@ import { Camera } from './camera.js';
 import { captureImage, loadImageFile } from './image-capture.js';
 import { ImageCropper } from './image-cropper.js';
 import { preprocessImage } from './image-preprocessor.js';
-import { OcrEngine } from './ocr-engine.js';
 import { parseLabel, parseDate } from './lot-mfg-exp-parser.js';
 import { getItemForm } from './item-form.js';
 import { notify } from '../app.js';
@@ -16,6 +15,8 @@ function initializeScanner() {
     let hasImage = false;
     let processing = false;
     let cameraLoading = false;
+    let cameraRequest = 0;
+    let cameraFailure = '';
     let loadingImage = false;
     let closing = false;
     let cameraField = null;
@@ -24,11 +25,21 @@ function initializeScanner() {
     let savedCount = Number.parseInt(element('saved-count').textContent, 10) || 0;
     const camera = new Camera(element('camera-video'), () => updateControls());
     const cropper = new ImageCropper(element('captured-image'), element('crop-overlay'), () => updateControls());
-    const engine = new OcrEngine(message => {
-        const percent = Math.round((message.progress ?? 0) * 100);
-        element('ocr-progress').querySelector('progress').value = percent;
-        element('ocr-progress').querySelector('span').textContent = `${message.status} - ${percent}%`;
-    });
+    let engine = null;
+
+    async function getOcrEngine() {
+        if (!engine) {
+            let OcrEngine;
+            try { ({ OcrEngine } = await import('./ocr-engine.js')); }
+            catch { throw new Error('Modul OCR gagal dimuat. Kamera tetap dapat digunakan. Muat ulang halaman; jika masih gagal, rebuild Docker app dan web agar semua file JavaScript tersedia.'); }
+            engine = new OcrEngine(message => {
+                const percent = Math.round((message.progress ?? 0) * 100);
+                element('ocr-progress').querySelector('progress').value = percent;
+                element('ocr-progress').querySelector('span').textContent = `${message.status} - ${percent}%`;
+            });
+        }
+        return engine;
+    }
 
     function status(text, style = '') {
         element('ocr-status').textContent = text;
@@ -45,12 +56,17 @@ function initializeScanner() {
         const state = camera.state();
         const video = element('camera-video');
         const cameraReady = state.running && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+        video.hidden = !state.running;
+        element('camera-placeholder').hidden = state.running || hasImage;
+        element('image-workspace').hidden = state.running || !hasImage;
+        const cameraStatus = element('camera-status');
+        if (cameraStatus) cameraStatus.textContent = cameraLoading ? 'Membuka kamera: izinkan akses jika browser meminta. Tekan Hentikan untuk membatalkan.' : state.running ? cameraReady ? 'Kamera aktif. Arahkan ke label produk.' : 'Kamera terhubung. Menunggu gambar dari perangkat...' : cameraFailure || 'Kamera belum aktif. Tekan Mulai kamera atau Pilih foto.';
         const busy = processing || cameraLoading || loadingImage || form.busy;
         for (const id of ['manual-crop', 'retake']) element(id).disabled = !hasImage || busy;
         element('auto-ocr').disabled = busy || (state.running ? !cameraReady : !hasImage);
         for (const id of ['clear-selection', 'crop-area', 'read-selected']) element(id).disabled = !hasImage || !cropper.selection || busy;
         element('start-camera').disabled = busy || state.running;
-        element('stop-camera').disabled = !state.running;
+        element('stop-camera').disabled = !state.running && !cameraLoading;
         element('switch-camera').disabled = busy || !state.running || !state.canSwitch;
         element('torch-camera').disabled = busy || !state.running || !state.canTorch;
         element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
@@ -86,22 +102,24 @@ function initializeScanner() {
         if (announce) notify(field === 'AUTO' ? 'Foto siap. Jalankan OCR otomatis atau pilih area tulisan.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]} atau pilih area tulisan.`);
     }
 
-    async function startCamera() {
+    async function startCamera(switching = false) {
+        if (cameraLoading || processing || loadingImage || form.busy) return;
+        const request = ++cameraRequest;
         cameraLoading = true;
+        cameraFailure = '';
         updateControls();
         element('scanner-error').hidden = true;
         try {
-            await camera.start();
-            if (camera.stream) {
-                element('camera-video').hidden = false;
-                element('camera-placeholder').hidden = true;
-                element('image-workspace').hidden = true;
-            }
-        } catch (failure) { showError(failure); }
-        finally { cameraLoading = false; updateControls(); }
+            if (switching) await camera.switch();
+            else await camera.start();
+        } catch (failure) {
+            if (request === cameraRequest) { cameraFailure = failure.message; showError(failure); }
+        } finally {
+            if (request === cameraRequest) { cameraLoading = false; updateControls(); }
+        }
     }
 
-    element('start-camera').addEventListener('click', startCamera);
+    element('start-camera').addEventListener('click', () => startCamera());
     element('camera-video').addEventListener('loadeddata', updateControls);
     element('camera-field-picker').addEventListener('change', event => {
         if (event.target.name !== 'camera-field' || !fieldLabels[event.target.value]) return;
@@ -109,6 +127,9 @@ function initializeScanner() {
         updateControls();
     });
     element('stop-camera').addEventListener('click', () => {
+        cameraRequest += 1;
+        cameraLoading = false;
+        cameraFailure = '';
         camera.stop();
         element('camera-video').hidden = true;
         element('camera-placeholder').hidden = hasImage;
@@ -119,13 +140,8 @@ function initializeScanner() {
         if (!cameraField || element('capture-image').disabled) return;
         try { setImage(captureImage(element('camera-video')), cameraField); } catch (failure) { showError(failure); }
     });
-    element('retake').addEventListener('click', startCamera);
-    element('switch-camera').addEventListener('click', async () => {
-        cameraLoading = true;
-        updateControls();
-        try { await camera.switch(); } catch (failure) { showError(failure); }
-        finally { cameraLoading = false; updateControls(); }
-    });
+    element('retake').addEventListener('click', () => startCamera());
+    element('switch-camera').addEventListener('click', () => startCamera(true));
     element('torch-camera').addEventListener('click', async () => { try { await camera.toggleTorch(); } catch (failure) { showError(failure); } });
     element('image-file').addEventListener('change', async event => {
         const file = event.target.files[0];
@@ -226,7 +242,9 @@ function initializeScanner() {
             const preset = element('preprocess-preset').value;
             const processed = preprocessImage(crop.canvas, preset);
             if (selected) { element('crop-preview').replaceChildren(processed); element('crop-preview').hidden = false; }
-            const result = await engine.recognize(processed, selected);
+            const ocr = await getOcrEngine();
+            if (closing) return;
+            const result = await ocr.recognize(processed, selected);
             if (closing) return;
             let needsReview = !result.text || result.confidence < 70;
             form.field('ocr_confidence').value = Number(result.confidence).toFixed(2);
@@ -292,10 +310,12 @@ function initializeScanner() {
         updateControls();
         element('scanner').scrollIntoView({ block: 'start', behavior: 'smooth' });
     };
-    window.addEventListener('pagehide', () => { closing = true; camera.stop(); engine.terminate(); });
+    window.addEventListener('pagehide', () => { closing = true; cameraRequest += 1; cameraLoading = false; camera.stop(); engine?.terminate(); });
     window.addEventListener('pageshow', () => { closing = false; });
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
+            cameraRequest += 1;
+            cameraLoading = false;
             camera.stop();
             element('camera-video').hidden = true;
             element('camera-placeholder').hidden = hasImage;

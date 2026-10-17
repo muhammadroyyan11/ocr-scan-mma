@@ -128,6 +128,10 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
    Alternatif: **Pilih foto** JPEG/PNG/WebP, maksimal 15 MB / 40 MP. Foto tidak dikirim ke server.
 3. Kamera belakang diutamakan. Ganti kamera dan lampu hanya aktif jika hardware mendukung.
    Foto ulang membuka kamera lagi; Hentikan menghentikan semua track.
+   Preview ditampilkan sebelum menunggu playback; pencarian daftar kamera berjalan terpisah dan tidak
+   menutup stream jika ditolak atau belum selesai. Status izin/error tampil di dekat tombol kamera.
+   Permintaan izin yang belum dijawab dapat dibatalkan lewat **Hentikan**; stream yang datang terlambat langsung ditutup.
+   Modul OCR dimuat saat tombol baca ditekan, sehingga aset OCR yang hilang tidak memblokir kamera.
 4. Untuk foto dari perangkat, jalankan **OCR otomatis** untuk seluruh foto. Teks mentah, kandidat LOT/MFG/EXP,
    dan confidence OCR ditampilkan. Keyword tidak bergantung pada posisi/urutan label.
 5. Jika perlu, tekan **Pilih area**, tarik kotak dengan mouse/satu jari pada foto.
