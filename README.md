@@ -106,11 +106,15 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
 ## Alur Pemakaian
 
 1. Buat sesi penerimaan; supplier, referensi, kode gudang, dan catatan opsional.
-2. Pilih **Mulai kamera**, izinkan akses, arahkan ke label, lalu **Ambil foto**.
+2. Pilih **Mulai kamera**, izinkan akses, lalu pilih **LOT**, **MG / MFG** (tanggal produksi),
+   atau **Expired Date** langsung di tampilan kamera. Pilihan wajib sebelum **Ambil foto** aktif.
+   Arahkan ke tulisan yang dipilih, ambil foto, lalu tekan **Baca LOT / MG / MFG / Expired Date**.
+   Hasil OCR hanya mengisi field yang dipilih dan ditambahkan ke riwayat area.
+   Gunakan **Foto ulang**, pilih field berikutnya, lalu ulangi tanpa menghapus hasil sebelumnya.
    Alternatif: **Pilih foto** JPEG/PNG/WebP, maksimal 15 MB / 40 MP. Foto tidak dikirim ke server.
 3. Kamera belakang diutamakan. Ganti kamera dan lampu hanya aktif jika hardware mendukung.
    Foto ulang membuka kamera lagi; Hentikan menghentikan semua track.
-4. Jalankan **OCR otomatis** untuk seluruh foto. Teks mentah, kandidat LOT/MFG/EXP,
+4. Untuk foto dari perangkat, jalankan **OCR otomatis** untuk seluruh foto. Teks mentah, kandidat LOT/MFG/EXP,
    dan confidence OCR ditampilkan. Keyword tidak bergantung pada posisi/urutan label.
 5. Jika perlu, tekan **Pilih area**, tarik kotak dengan mouse/satu jari pada foto.
    **Preview crop** menampilkan crop + preset; **Baca area terpilih** menjalankan OCR crop.

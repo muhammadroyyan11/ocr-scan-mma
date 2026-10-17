@@ -135,11 +135,15 @@ test('fake camera capture, stop and retake release all media tracks', async ({ p
     await login(page);
     await newSession(page, `E2E-CAMERA-${Date.now()}`);
     await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-field-picker')).toBeVisible();
+    await expect(page.locator('#capture-image')).toBeDisabled();
+    await page.getByRole('radio', { name: 'LOT', exact: true }).check();
     await expect(page.locator('#capture-image')).toBeEnabled();
     await expect.poll(() => page.evaluate(() => document.querySelector('video').videoWidth)).toBeGreaterThan(0);
     await page.evaluate(() => { window.testStream = document.querySelector('video').srcObject; });
     await page.locator('#capture-image').click();
     await expect(page.locator('#image-workspace')).toBeVisible();
+    await expect(page.locator('#camera-field-picker')).toBeHidden();
     expect(await page.evaluate(() => document.querySelector('video').srcObject)).toBeNull();
     expect(await page.evaluate(() => window.testStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
     await page.locator('#retake').click();
@@ -153,6 +157,64 @@ test('fake camera capture, stop and retake release all media tracks', async ({ p
     await expect(page.locator('#image-file')).toBeEnabled();
 });
 
+test('camera field selection routes OCR to LOT, MFG and EXP without clearing previous scans', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return window.scannerTestResults.shift(); } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-CAMERA-FIELDS-${Date.now()}`);
+    await page.evaluate(() => {
+        window.scannerTestResults = [
+            { text: 'LOT: CAMERA123\nMFG: 2025-12-25\nEXP: 2027-12-30', confidence: 95 },
+            { text: '2025-12-25', confidence: 95 },
+            { text: '', confidence: 0 },
+            { text: '2027-12-30', confidence: 95 },
+        ];
+    });
+    const fields = [
+        { choice: 'LOT', field: 'lot_number', value: 'CAMERA123' },
+        { choice: 'MG / MFG', field: 'mfg_raw', value: '2025-12-25' },
+        { choice: 'MG / MFG', field: 'mfg_raw', value: '2025-12-25' },
+        { choice: 'Expired Date', field: 'exp_raw', value: '2027-12-30' },
+    ];
+    for (const [index, field] of fields.entries()) {
+        await page.locator(index === 0 ? '#start-camera' : '#retake').click();
+        await expect(page.locator('#camera-field-picker')).toBeVisible();
+        await page.getByRole('radio', { name: field.choice, exact: true }).check();
+        await expect(page.locator('#camera-field-hint')).toContainText(field.choice);
+        await page.locator('#capture-image').click();
+        await expect(page.locator('#auto-ocr')).toContainText(`Baca ${field.choice}`);
+        await expect(page.locator('#crop-field')).toHaveValue(index === 0 ? 'LOT' : index === 3 ? 'EXP' : 'MFG');
+        await page.locator('#auto-ocr').click();
+        await expect(page.locator('.crop-card')).toHaveCount(index + 1);
+        await expect(page.locator(`[name="${field.field}"]`)).toHaveValue(field.value);
+        await expect(page.locator('[name="lot_number"]')).toHaveValue('CAMERA123');
+        if (index === 0) await expect(page.locator('[name="mfg_raw"]')).toHaveValue('');
+        if (index < 3) await expect(page.locator('[name="exp_raw"]')).toHaveValue('');
+    }
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2025-12-25');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-12-30');
+    await page.locator('#confirm-scan').check();
+    const saved = page.waitForResponse(response => response.url().includes('/items') && response.request().method() === 'POST');
+    await page.locator('#save-item').click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const payload = response.request().postDataJSON();
+    expect(payload.scans.map(scan => scan.field_type)).toEqual(['LOT', 'MFG', 'MFG', 'EXP']);
+    expect(payload.scans.every(scan => scan.crop_metadata.width > 0 && scan.crop_metadata.height > 0)).toBe(true);
+    await page.locator('#next-item').click();
+    await expect(page.locator('.crop-card')).toHaveCount(0);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#capture-image')).toBeDisabled();
+    await expect(page.locator('#camera-field-picker input:checked')).toHaveCount(0);
+    await page.getByRole('radio', { name: 'Expired Date', exact: true }).check();
+    await page.locator('#capture-image').click();
+    await labelImage(page);
+    await expect(page.locator('#auto-ocr')).toContainText('OCR otomatis');
+    await expect(page.locator('#crop-field')).toHaveValue('AUTO');
+});
+
 test('mobile has no page overflow and touch crop uses image coordinates', async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
@@ -160,6 +222,13 @@ test('mobile has no page overflow and touch crop uses image coordinates', async 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/mobile-dashboard.png', fullPage: true });
     await newSession(page, `E2E-TOUCH-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await expect(page.locator('#camera-field-picker')).toBeVisible();
+    await page.getByRole('radio', { name: 'Expired Date', exact: true }).check();
+    await expect(page.locator('#capture-image')).toBeEnabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: 'test-results/mobile-camera-fields.png', fullPage: true });
+    await page.locator('#stop-camera').click();
     await labelImage(page);
     await page.locator('#manual-crop').click();
     const bounds = await page.locator('#crop-overlay').boundingBox();

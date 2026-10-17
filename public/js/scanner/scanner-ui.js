@@ -18,6 +18,9 @@ function initializeScanner() {
     let cameraLoading = false;
     let loadingImage = false;
     let closing = false;
+    let cameraField = null;
+    let imageField = 'AUTO';
+    const fieldLabels = { LOT: 'LOT', MFG: 'MG / MFG', EXP: 'Expired Date' };
     let savedCount = Number.parseInt(element('saved-count').textContent, 10) || 0;
     const camera = new Camera(element('camera-video'), () => updateControls());
     const cropper = new ImageCropper(element('captured-image'), element('crop-overlay'), () => updateControls());
@@ -48,7 +51,12 @@ function initializeScanner() {
         element('switch-camera').disabled = busy || !state.running || !state.canSwitch;
         element('torch-camera').disabled = busy || !state.running || !state.canTorch;
         element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
-        element('capture-image').disabled = busy || !state.running;
+        element('camera-field-picker').hidden = !state.running;
+        element('camera-field-picker').querySelectorAll('input').forEach(control => { control.disabled = busy; });
+        element('camera-field-hint').textContent = cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Pilih LOT, MG / MFG, atau Expired Date sebelum mengambil foto.';
+        element('capture-image').disabled = busy || !state.running || !cameraField;
+        element('capture-image').textContent = cameraField ? `Ambil foto ${fieldLabels[cameraField]}` : 'Ambil foto';
+        element('auto-ocr').firstChild.textContent = imageField === 'AUTO' ? 'OCR otomatis ' : `Baca ${fieldLabels[imageField]} `;
         element('image-file').disabled = busy;
         element('next-item').disabled = busy;
         element('crop-field').disabled = busy;
@@ -58,7 +66,9 @@ function initializeScanner() {
         cropper.enable(hasImage && cropper.enabled && !busy);
     }
 
-    function setImage(canvas) {
+    function setImage(canvas, field = 'AUTO') {
+        imageField = field;
+        element('crop-field').value = field;
         hasImage = true;
         cropper.setImage(canvas);
         camera.stop();
@@ -69,7 +79,7 @@ function initializeScanner() {
         element('scanner-error').hidden = true;
         status('Idle');
         updateControls();
-        notify('Foto siap. Jalankan OCR otomatis atau pilih area tulisan.');
+        notify(field === 'AUTO' ? 'Foto siap. Jalankan OCR otomatis atau pilih area tulisan.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]} atau pilih area tulisan.`);
     }
 
     async function startCamera() {
@@ -88,6 +98,11 @@ function initializeScanner() {
     }
 
     element('start-camera').addEventListener('click', startCamera);
+    element('camera-field-picker').addEventListener('change', event => {
+        if (event.target.name !== 'camera-field' || !fieldLabels[event.target.value]) return;
+        cameraField = event.target.value;
+        updateControls();
+    });
     element('stop-camera').addEventListener('click', () => {
         camera.stop();
         element('camera-video').hidden = true;
@@ -95,7 +110,10 @@ function initializeScanner() {
         element('image-workspace').hidden = !hasImage;
         updateControls();
     });
-    element('capture-image').addEventListener('click', () => { try { setImage(captureImage(element('camera-video'))); } catch (failure) { showError(failure); } });
+    element('capture-image').addEventListener('click', () => {
+        if (!cameraField || element('capture-image').disabled) return;
+        try { setImage(captureImage(element('camera-video')), cameraField); } catch (failure) { showError(failure); }
+    });
     element('retake').addEventListener('click', startCamera);
     element('switch-camera').addEventListener('click', async () => {
         cameraLoading = true;
@@ -182,7 +200,8 @@ function initializeScanner() {
 
     async function recognize(selected = false) {
         if (processing || !hasImage || form.busy) return;
-        if (selected && form.scans.length >= 30) { showError(new Error('Maksimal 30 catatan crop per item. Hapus catatan yang tidak diperlukan.')); return; }
+        const targeted = selected || imageField !== 'AUTO';
+        if (targeted && form.scans.length >= 30) { showError(new Error('Maksimal 30 catatan crop per item. Hapus catatan yang tidak diperlukan.')); return; }
         processing = true;
         const wasCropEnabled = cropper.enabled;
         updateControls();
@@ -200,19 +219,22 @@ function initializeScanner() {
             const result = await engine.recognize(processed, selected);
             if (closing) return;
             form.field('ocr_confidence').value = Number(result.confidence).toFixed(2);
-            if (selected) {
-                const parsed = parseLabel(result.text, result.confidence);
-                const detected = Object.entries(parsed.fields).filter(([, values]) => values.length === 1);
-                const choice = element('crop-field').value;
-                const field = choice === 'AUTO' ? (detected.length === 1 ? detected[0][0] : 'OTHER') : choice;
-                const normalized = parsed.fields[field]?.length === 1 ? parsed.fields[field][0].raw : result.text;
-                const scan = { field_type: field, raw_text: result.text.slice(0, 2000), normalized_text: normalized.slice(0, 2000), confidence: result.confidence, crop_metadata: { ...crop.metadata, preset } };
-                form.scans.push(scan);
-                addCropCard(crop.canvas, scan);
-                applyScan(scan);
-            } else {
+            if (!selected) {
                 const existing = form.field('ocr_raw_text').value;
                 form.field('ocr_raw_text').value = existing && existing !== result.text ? `${existing}\n\n${result.text}`.slice(0, 20000) : result.text.slice(0, 20000);
+            }
+            if (targeted) {
+                const parsed = parseLabel(result.text, result.confidence);
+                const detected = Object.entries(parsed.fields).filter(([, values]) => values.length === 1);
+                const choice = selected ? element('crop-field').value : imageField;
+                const field = choice === 'AUTO' ? (detected.length === 1 ? detected[0][0] : 'OTHER') : choice;
+                const normalized = parsed.fields[field]?.length === 1 ? parsed.fields[field][0].raw : result.text;
+                const metadata = crop.metadata ?? { x: 0, y: 0, width: crop.canvas.width, height: crop.canvas.height, image_width: crop.canvas.width, image_height: crop.canvas.height };
+                const scan = { field_type: field, raw_text: result.text.slice(0, 2000), normalized_text: normalized.slice(0, 2000), confidence: result.confidence, crop_metadata: { ...metadata, preset } };
+                form.scans.push(scan);
+                addCropCard(crop.canvas, scan);
+                if (result.text.trim()) applyScan(scan);
+            } else {
                 form.analyze(result.text, result.confidence);
             }
             form.markDirty();
@@ -237,6 +259,10 @@ function initializeScanner() {
     form.onBusy = () => updateControls();
     form.onReset = () => {
         camera.stop();
+        cameraField = null;
+        imageField = 'AUTO';
+        element('camera-field-picker').querySelectorAll('input').forEach(control => { control.checked = false; });
+        element('crop-field').value = 'AUTO';
         hasImage = false;
         cropper.clear();
         cropper.enable(false);
