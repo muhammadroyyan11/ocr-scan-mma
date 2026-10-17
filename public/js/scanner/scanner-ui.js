@@ -1,0 +1,266 @@
+import { Camera } from './camera.js';
+import { captureImage, loadImageFile } from './image-capture.js';
+import { ImageCropper } from './image-cropper.js';
+import { preprocessImage } from './image-preprocessor.js';
+import { OcrEngine } from './ocr-engine.js';
+import { parseLabel, parseDate } from './lot-mfg-exp-parser.js';
+import { getItemForm } from './item-form.js';
+import { notify } from '../app.js';
+
+const root = document.querySelector('#scanner');
+if (root) initializeScanner();
+
+function initializeScanner() {
+    const element = id => document.getElementById(id);
+    const form = getItemForm();
+    let hasImage = false;
+    let processing = false;
+    let cameraLoading = false;
+    let loadingImage = false;
+    let closing = false;
+    let savedCount = Number.parseInt(element('saved-count').textContent, 10) || 0;
+    const camera = new Camera(element('camera-video'), () => updateControls());
+    const cropper = new ImageCropper(element('captured-image'), element('crop-overlay'), () => updateControls());
+    const engine = new OcrEngine(message => {
+        const percent = Math.round((message.progress ?? 0) * 100);
+        element('ocr-progress').querySelector('progress').value = percent;
+        element('ocr-progress').querySelector('span').textContent = `${message.status} - ${percent}%`;
+    });
+
+    function status(text, style = '') {
+        element('ocr-status').textContent = text;
+        element('ocr-status').className = `badge ${style}`;
+    }
+
+    function showError(error) {
+        element('scanner-error').textContent = error.message;
+        element('scanner-error').hidden = false;
+        status('Error', 'error');
+    }
+
+    function updateControls() {
+        const state = camera.state();
+        const busy = processing || cameraLoading || loadingImage || form.busy;
+        for (const id of ['auto-ocr', 'manual-crop', 'retake']) element(id).disabled = !hasImage || busy;
+        for (const id of ['clear-selection', 'crop-area', 'read-selected']) element(id).disabled = !hasImage || !cropper.selection || busy;
+        element('start-camera').disabled = busy || state.running;
+        element('stop-camera').disabled = !state.running;
+        element('switch-camera').disabled = busy || !state.running || !state.canSwitch;
+        element('torch-camera').disabled = busy || !state.running || !state.canTorch;
+        element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
+        element('capture-image').disabled = busy || !state.running;
+        element('image-file').disabled = busy;
+        element('next-item').disabled = busy;
+        element('crop-field').disabled = busy;
+        element('preprocess-preset').disabled = busy;
+        form.form.querySelector('fieldset').disabled = processing || loadingImage || form.busy;
+        element('crop-history').querySelectorAll('input, textarea, select, button').forEach(control => { control.disabled = busy; });
+        cropper.enable(hasImage && cropper.enabled && !busy);
+    }
+
+    function setImage(canvas) {
+        hasImage = true;
+        cropper.setImage(canvas);
+        camera.stop();
+        element('camera-video').hidden = true;
+        element('camera-placeholder').hidden = true;
+        element('image-workspace').hidden = false;
+        element('crop-preview').hidden = true;
+        element('scanner-error').hidden = true;
+        status('Idle');
+        updateControls();
+        notify('Foto siap. Jalankan OCR otomatis atau pilih area tulisan.');
+    }
+
+    async function startCamera() {
+        cameraLoading = true;
+        updateControls();
+        element('scanner-error').hidden = true;
+        try {
+            await camera.start();
+            if (camera.stream) {
+                element('camera-video').hidden = false;
+                element('camera-placeholder').hidden = true;
+                element('image-workspace').hidden = true;
+            }
+        } catch (failure) { showError(failure); }
+        finally { cameraLoading = false; updateControls(); }
+    }
+
+    element('start-camera').addEventListener('click', startCamera);
+    element('stop-camera').addEventListener('click', () => {
+        camera.stop();
+        element('camera-video').hidden = true;
+        element('camera-placeholder').hidden = hasImage;
+        element('image-workspace').hidden = !hasImage;
+        updateControls();
+    });
+    element('capture-image').addEventListener('click', () => { try { setImage(captureImage(element('camera-video'))); } catch (failure) { showError(failure); } });
+    element('retake').addEventListener('click', startCamera);
+    element('switch-camera').addEventListener('click', async () => {
+        cameraLoading = true;
+        updateControls();
+        try { await camera.switch(); } catch (failure) { showError(failure); }
+        finally { cameraLoading = false; updateControls(); }
+    });
+    element('torch-camera').addEventListener('click', async () => { try { await camera.toggleTorch(); } catch (failure) { showError(failure); } });
+    element('image-file').addEventListener('change', async event => {
+        const file = event.target.files[0];
+        if (!file) return;
+        loadingImage = true;
+        updateControls();
+        try { setImage(await loadImageFile(file)); } catch (failure) { showError(failure); }
+        finally { loadingImage = false; event.target.value = ''; updateControls(); }
+    });
+    element('manual-crop').addEventListener('click', () => {
+        camera.stop();
+        element('camera-video').hidden = true;
+        element('image-workspace').hidden = false;
+        cropper.enable();
+        element('image-workspace').scrollIntoView({ block: 'center', behavior: 'auto' });
+        notify('Tarik kotak mengelilingi teks. Anda bisa memakai mouse atau satu jari.');
+    });
+    element('clear-selection').addEventListener('click', () => { cropper.clear(); element('crop-preview').hidden = true; });
+    element('crop-area').addEventListener('click', () => {
+        try {
+            const { canvas } = cropper.crop();
+            element('crop-preview').replaceChildren(preprocessImage(canvas, element('preprocess-preset').value));
+            element('crop-preview').hidden = false;
+        } catch (failure) { showError(failure); }
+    });
+
+    function applyScan(scan) {
+        const parsed = parseLabel(scan.raw_text, scan.confidence);
+        form.renderCandidates(parsed);
+        if (scan.field_type === 'OTHER') {
+            form.field('ocr_raw_text').value = `${form.field('ocr_raw_text').value}\n${scan.normalized_text || scan.raw_text}`.trim().slice(0, 20000);
+            form.markDirty();
+            return;
+        }
+        const candidate = parsed.fields[scan.field_type]?.[0] ?? { field: scan.field_type, raw: scan.normalized_text || scan.raw_text, date: scan.field_type === 'LOT' ? null : parseDate(scan.normalized_text || scan.raw_text) };
+        form.fillCandidate({ ...candidate, raw: scan.normalized_text || candidate.raw, date: scan.field_type === 'LOT' ? null : parseDate(scan.normalized_text || candidate.raw) });
+    }
+
+    function addCropCard(canvas, scan) {
+        const card = document.createElement('article');
+        card.className = 'crop-card';
+        const thumbnail = document.createElement('canvas');
+        thumbnail.width = Math.min(canvas.width, 480);
+        thumbnail.height = Math.max(1, Math.round(canvas.height * thumbnail.width / canvas.width));
+        thumbnail.getContext('2d').drawImage(canvas, 0, 0, thumbnail.width, thumbnail.height);
+        const heading = document.createElement('strong');
+        heading.textContent = `Area ${form.scans.length} - ${Math.round(scan.confidence)}% keyakinan OCR`;
+        const select = document.createElement('select');
+        select.setAttribute('aria-label', 'Jenis field crop');
+        ['LOT', 'MFG', 'EXP', 'OTHER'].forEach(field => select.add(new Option(field, field, false, field === scan.field_type)));
+        select.addEventListener('change', () => { scan.field_type = select.value; form.markDirty(); });
+        const raw = document.createElement('p');
+        raw.className = 'mono';
+        raw.textContent = `OCR asli: ${scan.raw_text || '(kosong)'}`;
+        const text = document.createElement('textarea');
+        text.setAttribute('aria-label', 'Teks crop yang dapat dikoreksi');
+        text.maxLength = 2000;
+        text.value = scan.normalized_text;
+        text.rows = 2;
+        text.addEventListener('input', () => { scan.normalized_text = text.value; form.markDirty(); });
+        const actions = document.createElement('div');
+        actions.className = 'button-row';
+        const apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'button secondary';
+        apply.textContent = 'Terapkan ke field';
+        apply.addEventListener('click', () => applyScan(scan));
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'button subtle danger-text';
+        remove.textContent = 'Hapus catatan crop';
+        remove.addEventListener('click', () => { form.scans = form.scans.filter(value => value !== scan); card.remove(); form.markDirty(); });
+        actions.append(apply, remove);
+        card.append(thumbnail, heading, select, raw, text, actions);
+        element('crop-history').append(card);
+    }
+
+    async function recognize(selected = false) {
+        if (processing || !hasImage || form.busy) return;
+        if (selected && form.scans.length >= 30) { showError(new Error('Maksimal 30 catatan crop per item. Hapus catatan yang tidak diperlukan.')); return; }
+        processing = true;
+        const wasCropEnabled = cropper.enabled;
+        updateControls();
+        camera.stop();
+        element('camera-video').hidden = true;
+        element('image-workspace').hidden = false;
+        element('scanner-error').hidden = true;
+        element('ocr-progress').hidden = false;
+        status('Processing');
+        try {
+            const crop = selected ? cropper.crop() : { canvas: element('captured-image'), metadata: null };
+            const preset = element('preprocess-preset').value;
+            const processed = preprocessImage(crop.canvas, preset);
+            if (selected) { element('crop-preview').replaceChildren(processed); element('crop-preview').hidden = false; }
+            const result = await engine.recognize(processed, selected);
+            if (closing) return;
+            form.field('ocr_confidence').value = Number(result.confidence).toFixed(2);
+            if (selected) {
+                const parsed = parseLabel(result.text, result.confidence);
+                const detected = Object.entries(parsed.fields).filter(([, values]) => values.length === 1);
+                const choice = element('crop-field').value;
+                const field = choice === 'AUTO' ? (detected.length === 1 ? detected[0][0] : 'OTHER') : choice;
+                const normalized = parsed.fields[field]?.length === 1 ? parsed.fields[field][0].raw : result.text;
+                const scan = { field_type: field, raw_text: result.text.slice(0, 2000), normalized_text: normalized.slice(0, 2000), confidence: result.confidence, crop_metadata: { ...crop.metadata, preset } };
+                form.scans.push(scan);
+                addCropCard(crop.canvas, scan);
+                applyScan(scan);
+            } else {
+                const existing = form.field('ocr_raw_text').value;
+                form.field('ocr_raw_text').value = existing && existing !== result.text ? `${existing}\n\n${result.text}`.slice(0, 20000) : result.text.slice(0, 20000);
+                form.analyze(result.text, result.confidence);
+            }
+            form.markDirty();
+            status(result.text && result.confidence >= 70 ? 'Success / Periksa hasil' : 'Needs Review', result.text && result.confidence >= 70 ? 'green' : 'amber');
+            if (!result.text) notify('Belum ada teks terbaca. Coba area lebih dekat atau preset lain.', true);
+        } catch (failure) { if (!closing) showError(failure); }
+        finally {
+            processing = false;
+            cropper.enable(wasCropEnabled);
+            element('ocr-progress').hidden = true;
+            updateControls();
+        }
+    }
+
+    element('auto-ocr').addEventListener('click', () => recognize());
+    element('read-selected').addEventListener('click', () => recognize(true));
+    form.onSaved = (result, wasNew) => {
+        if (wasNew) savedCount += 1;
+        element('saved-count').textContent = `${savedCount} item di sesi`;
+        notify('Item tersimpan. Pilih Scan item berikutnya untuk melanjutkan.');
+    };
+    form.onBusy = () => updateControls();
+    form.onReset = () => {
+        camera.stop();
+        hasImage = false;
+        cropper.clear();
+        cropper.enable(false);
+        for (const id of ['captured-image', 'crop-overlay']) { element(id).width = 1; element(id).height = 1; }
+        element('crop-history').replaceChildren();
+        element('crop-preview').replaceChildren();
+        element('crop-preview').hidden = true;
+        element('camera-video').hidden = true;
+        element('image-workspace').hidden = true;
+        element('camera-placeholder').hidden = false;
+        element('scanner-error').hidden = true;
+        status('Idle');
+        updateControls();
+        element('scanner').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    window.addEventListener('pagehide', () => { closing = true; camera.stop(); engine.terminate(); });
+    window.addEventListener('pageshow', () => { closing = false; });
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            camera.stop();
+            element('camera-video').hidden = true;
+            element('camera-placeholder').hidden = hasImage;
+            element('image-workspace').hidden = !hasImage;
+        }
+    });
+    updateControls();
+}

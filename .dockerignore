@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+!.env.testing
+node_modules
+vendor
+public/vendor
+storage/logs/*
+storage/framework/*
+test-results
+playwright-report

@@ -1,0 +1,16 @@
+import { mkdir, copyFile, cp, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+const require = createRequire(import.meta.url);
+const destination = 'public/vendor/ocr';
+await mkdir(`${destination}/lang`, { recursive: true });
+const tesseract = path.dirname(require.resolve('tesseract.js/package.json'));
+const core = path.dirname(require.resolve('tesseract.js-core/package.json'));
+const language = path.dirname(require.resolve('@tesseract.js-data/eng/package.json'));
+await copyFile(`${tesseract}/dist/tesseract.min.js`, `${destination}/tesseract.min.js`);
+await copyFile(`${tesseract}/dist/worker.min.js`, `${destination}/worker.min.js`);
+await cp(core, `${destination}/core`, { recursive: true });
+await copyFile(`${language}/4.0.0_best_int/eng.traineddata.gz`, `${destination}/lang/eng.traineddata.gz`);
+await copyFile(`${tesseract}/LICENSE.md`, `${destination}/LICENSE-tesseract.md`);
+await writeFile(`${destination}/NOTICE.txt`, 'Tesseract.js / Tesseract core: Apache-2.0. English traineddata: Apache-2.0. Distributed locally; no CDN required.\n');
+console.log('Aset OCR dan English traineddata tersedia lokal.');

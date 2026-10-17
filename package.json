@@ -1,0 +1,17 @@
+{
+  "name": "stock-arrival-scanner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/js/*.test.js",
+    "test:browser": "playwright test",
+    "vendor:ocr": "node scripts/vendor-ocr.mjs"
+  },
+  "dependencies": {
+    "tesseract.js": "6.0.1",
+    "@tesseract.js-data/eng": "1.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

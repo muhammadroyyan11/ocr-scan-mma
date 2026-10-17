@@ -1,0 +1,4 @@
+@media (max-width: 640px) {
+    .sidebar-user .icon-button { min-width: 44px; width: 44px; }
+    .crop-card textarea, .crop-card select, .ocr-toolbar select, .date-options select { font-size: 16px; }
+}

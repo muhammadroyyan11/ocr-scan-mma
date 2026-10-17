@@ -1,0 +1,70 @@
+name: stock-arrival-scanner
+services:
+  app:
+    build:
+      context: .
+      target: app
+      args:
+        INSTALL_DEV: ${INSTALL_DEV:-true}
+    restart: unless-stopped
+    environment:
+      APP_NAME: Stock Arrival Scanner
+      APP_ENV: ${APP_ENV:-production}
+      APP_KEY: ${APP_KEY:?Run bash scripts/setup.sh first}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_URL: ${APP_URL:-http://localhost:8092}
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-stock_arrival}
+      DB_USERNAME: ${DB_USERNAME:-scanner}
+      DB_PASSWORD: ${DB_PASSWORD:?Run bash scripts/setup.sh first}
+      SESSION_DRIVER: file
+      SESSION_SECURE_COOKIE: ${SESSION_SECURE_COOKIE:-false}
+      CACHE_DRIVER: file
+      LOG_CHANNEL: stderr
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    volumes:
+      - app_storage:/var/www/html/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, "php -r 'exit(@fsockopen(\"127.0.0.1\",9000)?0:1);'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - '${APP_PORT:-8092}:80'
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://127.0.0.1/api/health || exit 1']
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_DATABASE:-stock_arrival}
+      MARIADB_USER: ${DB_USERNAME:-scanner}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Run bash scripts/setup.sh first}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Run bash scripts/setup.sh first}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+volumes:
+  db_data:
+  app_storage:
