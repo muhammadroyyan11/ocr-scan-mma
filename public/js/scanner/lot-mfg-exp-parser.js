@@ -16,7 +16,7 @@ function isoDate(year, month, day) {
 
 export function parseDate(raw, { format = '', century = null, suggestCorrections = true } = {}) {
     const value = String(raw ?? '').trim().toUpperCase();
-    const result = { raw: String(raw ?? ''), date: null, status: value ? 'unknown' : 'missing', candidates: [], warnings: [], corrections: [] };
+    const result = { raw: String(raw ?? ''), date: null, month: null, status: value ? 'unknown' : 'missing', candidates: [], warnings: [], corrections: [] };
     if (!value) return result;
     const add = (year, month, day, interpretation) => {
         const date = isoDate(Number(year), Number(month), Number(day));
@@ -58,9 +58,22 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
         matched = true;
         const month = monthNumber(match[2]);
         add(match[3], month, match[1], 'DD MON YYYY');
-    } else if ((/^[A-Z]+[\s./-]+\d{4}$/.test(value) && monthNumber(value.split(/[\s./-]/)[0])) || /^(0?[1-9]|1[0-2])[./-]\d{4}$/.test(value)) {
+    } else if ((match = value.match(/^(\d{4})\s*[./-]\s*(\d{1,2})$/)) || (match = value.match(/^(\d{1,2}|[A-Z]+)[\s./-]+(\d{4})$/))) {
+        const yearFirst = /^\d{4}/.test(value);
+        const year = Number(yearFirst ? match[1] : match[2]);
+        const month = yearFirst ? Number(match[2]) : monthNumber(match[1]) || Number(match[1]);
+        if (!yearFirst && /^[A-Z]+$/.test(match[1]) && !monthNumber(match[1])) {
+            result.warnings.push('Format tanggal belum dikenali. Teks mentah dipertahankan.');
+            return result;
+        }
+        if (!isoDate(year, month, 1)) {
+            result.status = 'invalid';
+            result.warnings.push('Bulan atau tahun tidak valid.');
+            return result;
+        }
+        result.month = `${year}-${String(month).padStart(2, '0')}`;
         result.status = 'incomplete';
-        result.warnings.push('Label hanya memiliki bulan dan tahun. Hari tidak ditentukan; simpan teks mentah atau isi tanggal setelah verifikasi.');
+        result.warnings.push('Label hanya memiliki bulan dan tahun. Disimpan sebagai bulan/tahun tanpa menambahkan hari.');
         return result;
     }
     if (result.candidates.length === 1) {
@@ -85,10 +98,12 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
 }
 
 export function dateOrderWarnings(mfg, exp) {
-    return mfg && exp && exp < mfg ? ['EXP lebih awal dari MFG. Periksa label; nilai tidak diubah.'] : [];
+    const earliestMfg = mfg?.length === 7 ? `${mfg}-01` : mfg;
+    const latestExp = exp?.length === 7 ? `${exp}-31` : exp;
+    return earliestMfg && latestExp && latestExp < earliestMfg ? ['EXP lebih awal dari MFG. Periksa label; nilai tidak diubah.'] : [];
 }
 
-export function parseLabel(text, confidence = null) {
+export function parseLabel(text, confidence = null, symbols = []) {
     const raw = String(text ?? '').replace(/\r/g, '');
     const matches = [...raw.matchAll(new RegExp(labelPattern.source, 'gi'))];
     const fields = { LOT: [], MFG: [], EXP: [] };
@@ -100,12 +115,20 @@ export function parseLabel(text, confidence = null) {
         if (!value) return;
         fields[field].push({ field, keyword, raw: value, confidence, date: field === 'LOT' ? null : parseDate(value) });
     });
+    for (const symbol of symbols) {
+        if (!['LOT', 'MFG', 'EXP'].includes(symbol.field) || !symbol.raw?.trim()) continue;
+        for (const field of Object.keys(fields)) fields[field] = fields[field].filter(candidate => {
+            if (field === symbol.field && candidate.raw === symbol.raw) return false;
+            return candidate.raw === symbol.raw || !candidate.raw.split(/\s+/).includes(symbol.raw);
+        });
+        fields[symbol.field].push({ ...symbol, date: symbol.field === 'LOT' ? null : parseDate(symbol.raw) });
+    }
     const warnings = [];
     for (const [field, candidates] of Object.entries(fields)) {
         if (candidates.length > 1) warnings.push(`${field} memiliki beberapa kandidat; pilih secara manual.`);
         candidates.forEach(candidate => warnings.push(...(candidate.date?.warnings ?? [])));
     }
-    const unassigned = matches.length ? [] : raw.match(/\b\d{1,4}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{6,8}\b/g) ?? [];
+    const unassigned = matches.length ? [] : [...new Set(raw.match(/\b\d{1,4}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{4}[./-]\d{1,2}\b|\b\d{6,8}\b/g) ?? [])].filter(value => !symbols.some(symbol => symbol.raw === value));
     if (unassigned.length) warnings.push('Kode tanpa keyword ditemukan. Tidak otomatis dianggap MFG atau EXP.');
     if (!raw.trim()) warnings.push('OCR belum menghasilkan teks. Coba crop, preset lain, atau isi manual.');
     warnings.push(...dateOrderWarnings(fields.MFG[0]?.date?.date, fields.EXP[0]?.date?.date));

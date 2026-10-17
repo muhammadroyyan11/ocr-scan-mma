@@ -48,6 +48,57 @@ test('unlabeled numeric codes are unassigned', () => {
     assert.deepEqual(result.unassigned, ['251218', '301217']);
 });
 
+test('symbol evidence assigns dates without treating unlabeled numbers as manufacture or expiry', () => {
+    const text = '[OT] FC001.1A26811 [lau 26.08.11 X : 2031.08';
+    const symbols = [
+        { field: 'LOT', raw: 'FC001.1A26811', keyword: 'LOT pada baris simbol', confidence: 85 },
+        { field: 'MFG', raw: '26.08.11', keyword: 'Simbol pabrik', confidence: 90 },
+        { field: 'EXP', raw: '2031.08', keyword: 'Simbol jam pasir', confidence: 90 },
+    ];
+    const result = parseLabel(text, 80, symbols);
+    assert.equal(result.raw, text);
+    assert.equal(result.fields.LOT[0].raw, 'FC001.1A26811');
+    assert.equal(result.fields.MFG[0].date.status, 'ambiguous');
+    assert.equal(result.fields.MFG[0].date.date, null);
+    assert.equal(result.fields.EXP[0].date.month, '2031-08');
+    assert.equal(result.fields.EXP[0].date.date, null);
+    assert.deepEqual(result.unassigned, []);
+    assert.equal(parseLabel(text).fields.MFG.length, 0);
+    assert.equal(parseLabel(text).fields.EXP.length, 0);
+});
+
+test('symbol evidence splits a LOT row without swallowing adjacent dates or duplicating keywords', () => {
+    const result = parseLabel('LOT FC001.1A26811 26.08.11 2031.08\nEXP 2031.08', 90, [
+        { field: 'LOT', raw: 'FC001.1A26811', keyword: 'LOT', confidence: 90 },
+        { field: 'MFG', raw: '26.08.11', keyword: 'Simbol pabrik', confidence: 90 },
+        { field: 'EXP', raw: '2031.08', keyword: 'Simbol jam pasir', confidence: 90 },
+    ]);
+    assert.equal(result.fields.LOT.length, 1);
+    assert.equal(result.fields.LOT[0].raw, 'FC001.1A26811');
+    assert.equal(result.fields.EXP.length, 1);
+    assert.equal(result.fields.MFG.length, 1);
+});
+
+test('symbol dates do not remove a legitimate lot containing the same characters', () => {
+    const result = parseLabel('LOT ABC2031.08XYZ', 90, [{ field: 'EXP', raw: '2031.08', keyword: 'Simbol jam pasir', confidence: 90 }]);
+    assert.equal(result.fields.LOT[0].raw, 'ABC2031.08XYZ');
+});
+
+test('month precision supports year-first, month-first and named months without inventing a day', () => {
+    for (const raw of ['2031.08', '2031/08', '2031-08', '08/2031', 'AUG 2031', 'AGUSTUS 2031']) {
+        const result = parseDate(raw);
+        assert.equal(result.month, '2031-08', raw);
+        assert.equal(result.date, null, raw);
+    }
+    for (const raw of ['2031.13', '2031.00', '2031.99', '0999.08']) {
+        assert.equal(parseDate(raw).status, 'invalid', raw);
+        assert.equal(parseDate(raw).month, null, raw);
+    }
+    assert.deepEqual(dateOrderWarnings('2026-08-11', '2026-08'), []);
+    assert.equal(dateOrderWarnings('2026-09-01', '2026-08').length, 1);
+    assert.deepEqual(dateOrderWarnings('2026-08', '2026-08-01'), []);
+});
+
 test('keywords on one line and multiple candidates', () => {
     const result = parseLabel('EXP: 2027-12-30 LOT: ABC123 MFG: 2025-12-25\nLOT: XYZ');
     assert.equal(result.fields.LOT.length, 2);

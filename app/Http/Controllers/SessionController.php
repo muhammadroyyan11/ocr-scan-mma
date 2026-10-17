@@ -59,9 +59,9 @@ class SessionController extends Controller
         return response()->streamDownload(function () use ($session) {
             $output = fopen('php://output', 'w');
             fwrite($output, "\xEF\xBB\xBF");
-            fputcsv($output, ['session_number', 'product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'exp_raw', 'exp_date', 'verification_status', 'ocr_confidence', 'notes']);
+            fputcsv($output, ['session_number', 'product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'exp_raw', 'exp_date', 'verification_status', 'ocr_confidence', 'notes', 'mfg_month', 'exp_month']);
             foreach ($session->items()->orderBy('id')->cursor() as $item) {
-                $values = [$session->session_number, $item->product_name, $item->product_reference, $item->barcode, $item->lot_number, $item->mfg_raw, $item->mfg_date?->format('Y-m-d'), $item->exp_raw, $item->exp_date?->format('Y-m-d'), $item->verification_status, $item->ocr_confidence, $item->notes];
+                $values = [$session->session_number, $item->product_name, $item->product_reference, $item->barcode, $item->lot_number, $item->mfg_raw, $item->mfg_date?->format('Y-m-d'), $item->exp_raw, $item->exp_date?->format('Y-m-d'), $item->verification_status, $item->ocr_confidence, $item->notes, $item->mfg_month, $item->exp_month];
                 fputcsv($output, array_map(fn ($value) => preg_match('/^[\s]*[=+@\-]/u', (string) $value) || preg_match('/^[\t\r\n]/', (string) $value) ? "'".$value : $value, $values));
             }
             fclose($output);

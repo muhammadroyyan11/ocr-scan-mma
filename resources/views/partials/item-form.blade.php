@@ -6,7 +6,9 @@
 @foreach(['mfg' => 'MG / MFG - Produksi', 'exp' => 'ED / EXP - Kedaluwarsa'] as $field => $label)
 <section class="date-field">
 <div class="field-section-heading"><strong>{{ $label }}</strong><button type="button" class="text-button" data-clear-field="{{ $field }}">Kosongkan</button></div>
-<label>Tanggal {{ strtoupper($field) }}<input type="date" name="{{ $field }}_date" value="{{ $item?->{$field.'_date'}?->format('Y-m-d') ?? '' }}" min="1000-01-01" max="9999-12-31"></label>
+<label>Ketelitian {{ strtoupper($field) }}<select data-date-precision="{{ $field }}"><option value="day">Tanggal lengkap</option><option value="month" @selected(filled($item?->{$field.'_month'}))>Bulan dan tahun saja</option></select></label>
+<label data-date-day="{{ $field }}" @if(filled($item?->{$field.'_month'})) hidden @endif>Tanggal {{ strtoupper($field) }}<input type="date" name="{{ $field }}_date" value="{{ $item?->{$field.'_date'}?->format('Y-m-d') ?? '' }}" min="1000-01-01" max="9999-12-31"></label>
+<label data-date-month="{{ $field }}" @unless(filled($item?->{$field.'_month'})) hidden @endunless>Bulan/tahun {{ strtoupper($field) }}<input type="month" name="{{ $field }}_month" value="{{ $item?->{$field.'_month'} ?? '' }}" min="1000-01" max="9999-12" pattern="[0-9]{4}-(0[1-9]|1[0-2])" placeholder="YYYY-MM"></label>
 <p class="muted">Terisi otomatis dari hasil scan yang tidak ambigu. Tetap cocokkan dengan label asli.</p>
 <details data-date-source="{{ $field }}"><summary>Teks asli hasil scan {{ strtoupper($field) }}</summary><label>Teks mentah {{ strtoupper($field) }}<input name="{{ $field }}_raw" value="{{ $item?->{$field.'_raw'} ?? '' }}" maxlength="255" placeholder="Contoh: 26.08.11 / 11 agustus 2026 / 11 aug 2026"></label></details>
 <details data-date-options="{{ $field }}"><summary>Interpretasi kode tanggal</summary><div class="date-options"><label>Format<select data-date-format="{{ $field }}"><option value="">Deteksi aman (tanpa asumsi)</option>

@@ -379,6 +379,80 @@ test('real OCR reads Indonesian MFG and English expiry month names', async ({ pa
     await expect(page.locator('[name="lot_number"]')).toHaveValue('DATES123');
 });
 
+test('real photo with factory and hourglass symbols fills LOT, MFG candidate and month-only expiry', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await login(page);
+    await newSession(page, `E2E-SYMBOL-PHOTO-${Date.now()}`);
+    const sessionUrl = page.url().replace('/scanner', '');
+    await page.locator('#image-file').setInputFiles('tests/browser/fixtures/symbol-label.png');
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('FC001.1A26811', { timeout: 90000 });
+    await expect(page.locator('[name="mfg_raw"]')).toHaveValue('26.08.11');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('');
+    await expect(page.locator('[data-date-options="mfg"]')).toHaveAttribute('open', '');
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('2031-08');
+    await expect(page.locator('[name="exp_month"]')).toBeVisible();
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toBeHidden();
+    await page.locator('[data-date-format="mfg"]').selectOption('YY.MM.DD');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('');
+    await page.locator('[data-century="mfg"]').selectOption('2000');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2026-08-11');
+    await page.locator('[name="verification_status"]').selectOption('verified');
+    await page.locator('#confirm-scan').check();
+    const pending = page.waitForResponse(response => response.url().includes('/items') && response.request().method() === 'POST');
+    await page.locator('#save-item').click();
+    const response = await pending;
+    expect(response.status()).toBe(201);
+    const result = await response.json();
+    expect(result.data.mfg_date).toBe('2026-08-11');
+    expect(result.data.exp_date).toBeNull();
+    expect(result.data.exp_month).toBe('2031-08');
+    expect(result.data.exp_raw).toBe('2031.08');
+    expect(result.warnings).toEqual([]);
+    await expect(page.locator('#item-success')).toBeVisible();
+    await page.locator('#next-item').click();
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toBeVisible();
+    await page.goto(`/receiving-items/${result.data.id}`);
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('2031-08');
+    await expect(page.locator('[name="exp_month"]')).toBeVisible();
+    await page.locator('[name="notes"]').fill('Month precision remains unchanged after editing');
+    await page.locator('#confirm-scan').check();
+    await page.locator('#save-item').click();
+    await expect(page.locator('#item-success')).toBeVisible();
+    await page.goto(sessionUrl);
+    await expect(page.getByRole('cell', { name: /2031-08 \(bulan\)/ })).toBeVisible();
+    const csv = await page.request.get(`${sessionUrl}/export`);
+    expect(await csv.text()).toContain('mfg_month,exp_month');
+    expect(await csv.text()).not.toContain('2031-08-01');
+    expect(errors).toEqual([]);
+});
+
+test('month-only scans preserve manual input, switch precision explicitly and clear without a stale value', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return { text: "EXP: 2031.08", confidence: 95 }; } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-MONTH-${Date.now()}`);
+    await labelImage(page);
+    await page.locator('[name="exp_date"]').fill('2032-09-15');
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2032-09-15');
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('');
+    await page.locator('#parser-candidates button').filter({ hasText: '2031.08' }).click();
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('2031-08');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('');
+    await page.locator('[data-date-precision="exp"]').selectOption('day');
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('');
+    await page.locator('[data-clear-field="exp"]').click();
+    await expect(page.locator('[name="exp_raw"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_month"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('');
+});
+
 test('camera MFG and ED scans preserve dotted dates until the format and century are confirmed', async ({ page }) => {
     await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
         contentType: 'application/javascript',

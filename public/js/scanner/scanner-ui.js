@@ -235,7 +235,7 @@ function initializeScanner() {
                 form.field('ocr_raw_text').value = existing && existing !== result.text ? `${existing}\n\n${result.text}`.slice(0, 20000) : result.text.slice(0, 20000);
             }
             if (targeted) {
-                const parsed = parseLabel(result.text, result.confidence);
+                const parsed = parseLabel(result.text, result.confidence, result.symbols ?? []);
                 const detected = Object.entries(parsed.fields).filter(([, values]) => values.length === 1);
                 const choice = selected ? element('crop-field').value : imageField;
                 const field = choice === 'AUTO' ? (detected.length === 1 ? detected[0][0] : 'OTHER') : choice;
@@ -247,9 +247,9 @@ function initializeScanner() {
                 if (result.text.trim()) applyScan(scan);
                 if (field === 'MFG' || field === 'EXP') needsReview ||= !parseDate(scan.normalized_text).date;
             } else {
-                const parsed = form.analyze(result.text, result.confidence);
+                const parsed = form.analyze(result.text, result.confidence, true, result.symbols ?? []);
                 const candidates = Object.values(parsed.fields).flat();
-                needsReview ||= !candidates.length || Object.values(parsed.fields).some(values => values.length > 1) || candidates.some(candidate => candidate.date && !candidate.date.date);
+                needsReview ||= !candidates.length || Object.values(parsed.fields).some(values => values.length > 1) || candidates.some(candidate => candidate.date && !candidate.date.date && !candidate.date.month);
             }
             form.markDirty();
             status(needsReview ? 'Needs Review' : 'Success / Periksa hasil', needsReview ? 'amber' : 'green');

@@ -32,6 +32,7 @@ export class ItemForm {
         form.addEventListener('change', event => {
             const dateField = event.target.dataset.dateFormat || event.target.dataset.century;
             if (dateField) this.syncDate(dateField);
+            if (event.target.dataset.datePrecision) this.setDatePrecision(event.target.dataset.datePrecision, event.target.value);
             if (event.target !== this.confirmation) this.markDirty();
             this.updateDateFeedback();
             this.syncSave();
@@ -40,7 +41,8 @@ export class ItemForm {
         form.querySelector('#parse-text').addEventListener('click', () => this.analyze(this.field('ocr_raw_text').value));
         form.querySelector('#clear-fields').addEventListener('click', () => {
             if (!window.confirm('Kosongkan field hasil scan? Riwayat crop tidak dihapus.')) return;
-            for (const name of ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'exp_raw', 'exp_date', 'ocr_raw_text', 'ocr_confidence', 'notes']) this.field(name).value = '';
+            for (const name of ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'mfg_month', 'exp_raw', 'exp_date', 'exp_month', 'ocr_raw_text', 'ocr_confidence', 'notes']) this.field(name).value = '';
+            for (const field of ['mfg', 'exp']) this.setDatePrecision(field, 'day');
             this.field('verification_status').value = 'needs_review';
             this.markDirty();
             this.updateDateFeedback();
@@ -50,6 +52,8 @@ export class ItemForm {
             const field = button.dataset.clearField;
             this.field(`${field}_raw`).value = '';
             this.field(`${field}_date`).value = '';
+            this.field(`${field}_month`).value = '';
+            this.setDatePrecision(field, 'day');
             this.markDirty();
             this.updateDateFeedback();
         }));
@@ -63,6 +67,7 @@ export class ItemForm {
             if (this.dirty && !window.confirm('Item memiliki perubahan yang belum disimpan. Buang perubahan dan lanjutkan?')) return;
             this.reset();
         });
+        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`).value ? 'month' : 'day');
         this.updateDateFeedback();
         this.syncSave();
         window.addEventListener('beforeunload', event => {
@@ -87,23 +92,33 @@ export class ItemForm {
     }
 
     syncDate(field) {
-        this.field(`${field}_date`).value = this.interpret(field).date ?? '';
+        const result = this.interpret(field);
+        this.setDatePrecision(field, result.month ? 'month' : 'day');
+        this.field(`${field}_date`).value = result.date ?? '';
+        this.field(`${field}_month`).value = result.month ?? '';
+    }
+
+    setDatePrecision(field, precision) {
+        this.form.querySelector(`[data-date-precision="${field}"]`).value = precision;
+        this.form.querySelector(`[data-date-day="${field}"]`).hidden = precision === 'month';
+        this.form.querySelector(`[data-date-month="${field}"]`).hidden = precision !== 'month';
+        this.field(`${field}_${precision === 'month' ? 'date' : 'month'}`).value = '';
     }
 
     updateDateFeedback() {
         for (const field of ['mfg', 'exp']) {
             const result = this.interpret(field);
             const output = this.form.querySelector(`[data-date-feedback="${field}"]`);
-            const confirmed = this.field(`${field}_date`).value;
+            const confirmed = this.field(`${field}_date`).value || this.field(`${field}_month`).value;
             const messages = [...result.warnings];
             if (result.status === 'ambiguous') this.form.querySelector(`[data-date-options="${field}"]`).open = true;
             if (result.date) messages.unshift(`Interpretasi: ${result.date} (${result.candidates[0].format}). Periksa sebelum konfirmasi.`);
-            if (confirmed) messages.push(`Tanggal yang akan disimpan: ${confirmed}.`);
+            if (confirmed) messages.push(`${confirmed.length === 7 ? 'Bulan/tahun' : 'Tanggal'} yang akan disimpan: ${confirmed}.`);
             else if (result.raw.trim()) messages.push(`Hasil scan: "${result.raw}". Tanggal belum diisi; pastikan format atau koreksi teks asli hasil scan.`);
             if (result.candidates.length > 1) messages.push(`Kandidat: ${result.candidates.map(candidate => `${candidate.date} / ${candidate.format}`).join(' atau ')}.`);
             output.textContent = messages.join(' ');
         }
-        const warnings = dateOrderWarnings(this.field('mfg_date').value, this.field('exp_date').value);
+        const warnings = dateOrderWarnings(this.field('mfg_date').value || this.field('mfg_month').value, this.field('exp_date').value || this.field('exp_month').value);
         const output = this.form.querySelector('#date-order-warning');
         output.textContent = warnings.join(' ');
         output.hidden = !warnings.length;
@@ -116,11 +131,9 @@ export class ItemForm {
             if (overwrite || !this.field('lot_number').value) this.field('lot_number').value = candidate.raw.slice(0, 255);
         } else {
             const prefix = field.toLowerCase();
-            if (overwrite || (!this.field(`${prefix}_raw`).value && !this.field(`${prefix}_date`).value)) {
+            if (overwrite || (!this.field(`${prefix}_raw`).value && !this.field(`${prefix}_date`).value && !this.field(`${prefix}_month`).value)) {
                 this.field(`${prefix}_raw`).value = candidate.raw.slice(0, 255);
-                this.field(`${prefix}_date`).value = candidate.date?.date ?? '';
-                this.form.querySelector(`[data-date-format="${prefix}"]`).value = '';
-                this.form.querySelector(`[data-century="${prefix}"]`).value = '';
+                this.syncDate(prefix);
             }
         }
         this.markDirty();
@@ -160,8 +173,8 @@ export class ItemForm {
         });
     }
 
-    analyze(text, confidence = null, fill = true) {
-        const parsed = parseLabel(text, confidence);
+    analyze(text, confidence = null, fill = true, symbols = []) {
+        const parsed = parseLabel(text, confidence, symbols);
         if (parsed.raw.trim() && Object.values(parsed.fields).every(candidates => !candidates.length)) {
             parsed.warnings.push('Jenis data belum dikenali. Sertakan penanda LOT/BATCH, MG/MFG, atau ED/EXP pada foto, atau pilih jenis scan secara manual.');
         }
@@ -181,6 +194,7 @@ export class ItemForm {
         this.form.querySelector('#item-error').hidden = true;
         if (this.saveButton) this.saveButton.textContent = 'Simpan item';
         this.renderCandidates(parseLabel(''));
+        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`).value ? 'month' : 'day');
         this.updateDateFeedback();
         this.syncSave();
         this.onReset();

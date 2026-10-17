@@ -13,7 +13,14 @@ class ItemController extends Controller
 {
     private function prepare(ItemRequest $request, ?ReceivingItem $item = null): array
     {
-        $data = array_replace($item?->only(['mfg_raw', 'mfg_date', 'exp_raw', 'exp_date']) ?? [], Arr::except($request->validated(), ['confirmed', 'scans']));
+        $data = array_replace($item?->only(['mfg_raw', 'mfg_date', 'mfg_month', 'exp_raw', 'exp_date', 'exp_month']) ?? [], Arr::except($request->validated(), ['confirmed', 'scans']));
+        foreach (['mfg', 'exp'] as $field) {
+            if ($request->filled($field.'_month')) {
+                $data[$field.'_date'] = null;
+            } elseif ($request->filled($field.'_date')) {
+                $data[$field.'_month'] = null;
+            }
+        }
         foreach (['mfg_date', 'exp_date'] as $field) {
             if (($data[$field] ?? null) instanceof \DateTimeInterface) {
                 $data[$field] = $data[$field]->format('Y-m-d');
@@ -21,12 +28,14 @@ class ItemController extends Controller
         }
         $warnings = [];
         foreach (['mfg', 'exp'] as $field) {
-            if (! empty($data[$field.'_raw']) && empty($data[$field.'_date'])) {
+            if (! empty($data[$field.'_raw']) && empty($data[$field.'_date']) && empty($data[$field.'_month'])) {
                 $data['verification_status'] = 'needs_review';
                 $warnings[] = strtoupper($field).' belum memiliki tanggal yang dikonfirmasi; teks mentah dipertahankan.';
             }
         }
-        if (! empty($data['mfg_date']) && ! empty($data['exp_date']) && $data['exp_date'] < $data['mfg_date']) {
+        $earliestMfg = $data['mfg_date'] ?? (! empty($data['mfg_month']) ? $data['mfg_month'].'-01' : null);
+        $latestExp = $data['exp_date'] ?? (! empty($data['exp_month']) ? $data['exp_month'].'-31' : null);
+        if ($earliestMfg && $latestExp && $latestExp < $earliestMfg) {
             $warnings[] = 'EXP lebih awal dari MFG. Periksa label; nilai tidak diubah.';
             $data['verification_status'] = 'needs_review';
         }

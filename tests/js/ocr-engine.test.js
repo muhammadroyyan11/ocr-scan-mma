@@ -113,3 +113,20 @@ test('leaving the scanner while the library loads still terminates the worker', 
     await closing;
     assert.equal(terminated, true);
 });
+
+test('recognition requests bounding boxes and preserves text without symbol evidence', async context => {
+    const { engine } = await environment(context);
+    let output;
+    window.Tesseract = { createWorker: async () => ({
+        setParameters: async () => {},
+        recognize: async (canvas, options, requestedOutput) => {
+            output = requestedOutput;
+            return { data: { text: 'LOT A123\n', confidence: 95 } };
+        },
+    }) };
+    const result = await engine.recognize({}, true);
+    assert.deepEqual(output, { blocks: true });
+    assert.equal(result.text, 'LOT A123');
+    assert.deepEqual(result.symbols, []);
+    assert.equal(engine.busy, false);
+});

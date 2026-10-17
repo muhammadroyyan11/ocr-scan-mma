@@ -114,6 +114,14 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
    **Ambil foto** tetap tersedia jika ingin memeriksa foto sebelum menjalankan OCR; tombol ini memerlukan pilihan jenis.
    Mode **Otomatis** mengenali penanda LOT/BATCH, MG/MFG/MFD, serta ED/EXP dan mengisi field masing-masing.
    Tanggal valid langsung mengisi input kalender MG dan ED; teks asli tersimpan di bagian yang dapat dibuka.
+   Label dengan simbol pabrik dan jam pasir juga dibaca dari bentuk simbol serta posisi tanggal di sebelah kanannya,
+   bukan dari urutan tanggal atau perkiraan masa berlaku. OCR mengulang pembacaan baris tanggal hingga dua baris
+   jika pembacaan seluruh foto belum lengkap. Pengenalan memakai pencocokan bentuk lokal di browser, bukan layanan AI server;
+   simbol buram, terlalu miring, atau berbeda bentuk mungkin perlu crop/pilihan field manual.
+   Contoh `26.08.11` masuk sebagai kandidat MG; pilih format `YY.MM.DD` dan abad `2000-2099` setelah memeriksa label
+   agar kalender terisi `2026-08-11`. Pilihan format yang sudah ditetapkan dipakai pada scan berikutnya untuk item yang sama.
+   ED `2031.08`, `08/2031`, atau `AUG 2031` langsung mengisi input bulan/tahun `2031-08`, tanpa mengarang hari.
+   Ketelitian bulan/tahun disimpan di `mfg_month` / `exp_month`, tetap terlihat saat edit dan tersedia di CSV.
    Mode satu field hanya mengisi field yang dipilih dan menambah riwayat area.
    Tanpa penanda jenis, sistem tidak menebak apakah tanggal adalah MG atau ED; pilih mode satu field.
    Gunakan **Foto ulang**, pilih field berikutnya, lalu ulangi tanpa menghapus hasil sebelumnya.

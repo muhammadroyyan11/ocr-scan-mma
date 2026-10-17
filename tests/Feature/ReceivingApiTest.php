@@ -35,6 +35,33 @@ class ReceivingApiTest extends TestCase
         $this->getJson('/api/receiving-sessions')->assertUnauthorized()->assertJsonStructure(['data', 'message', 'errors']);
     }
 
+    public function test_month_precision_round_trips_without_a_fabricated_day(): void
+    {
+        $user = $this->user();
+        $session = $this->sessionFor($user);
+        $response = $this->actingAs($user)->postJson("/api/receiving-sessions/$session->id/items", $this->payload(['mfg_raw' => '26.08.11', 'mfg_date' => '2026-08-11', 'exp_raw' => '2031.08', 'exp_month' => '2031-08']))
+            ->assertCreated()->assertJsonPath('data.exp_month', '2031-08')->assertJsonPath('data.exp_date', null)->assertJsonPath('data.verification_status', 'verified')->assertJsonCount(0, 'warnings');
+        $itemId = $response->json('data.id');
+        $this->getJson("/api/receiving-items/$itemId")->assertOk()->assertJsonPath('data.exp_month', '2031-08');
+        $this->get("/receiving-items/$itemId")->assertOk()->assertSee('2031-08');
+        $csv = $this->get("/receiving-sessions/$session->id/export")->assertOk()->streamedContent();
+        $this->assertStringContainsString('mfg_month,exp_month', $csv);
+        $this->assertStringContainsString('2031-08', $csv);
+        $this->assertStringNotContainsString('2031-08-01', $csv);
+        $this->putJson("/api/receiving-items/$itemId", $this->payload(['exp_date' => '2031-08-11']))->assertOk()->assertJsonPath('data.exp_month', null);
+        $this->putJson("/api/receiving-items/$itemId", $this->payload(['exp_month' => '2031-08']))->assertOk()->assertJsonPath('data.exp_date', null);
+    }
+
+    public function test_month_precision_validation_and_date_order(): void
+    {
+        $user = $this->user();
+        $session = $this->sessionFor($user);
+        $this->actingAs($user)->postJson("/api/receiving-sessions/$session->id/items", $this->payload(['mfg_month' => '2026-13', 'exp_month' => '2031-00']))->assertUnprocessable()->assertJsonValidationErrors(['mfg_month', 'exp_month']);
+        $this->postJson("/api/receiving-sessions/$session->id/items", $this->payload(['exp_month' => '2031-08', 'exp_date' => '2031-08-11']))->assertUnprocessable()->assertJsonValidationErrors('exp_month');
+        $this->postJson("/api/receiving-sessions/$session->id/items", $this->payload(['mfg_date' => '2026-09-01', 'exp_month' => '2026-08']))->assertCreated()->assertJsonPath('data.verification_status', 'needs_review')->assertJsonCount(1, 'warnings');
+        $this->postJson("/api/receiving-sessions/$session->id/items", $this->payload(['mfg_date' => '2026-08-11', 'exp_month' => '2026-08']))->assertCreated()->assertJsonPath('data.verification_status', 'verified')->assertJsonCount(0, 'warnings');
+    }
+
     public function test_real_login_logout_and_inactive_login(): void
     {
         $user = $this->user();

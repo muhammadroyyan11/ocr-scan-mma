@@ -1,4 +1,14 @@
+import { detectSymbolLabels, isNumericDate } from './symbol-label-detector.js';
+import { parseLabel } from './lot-mfg-exp-parser.js';
+
 let libraryPromise = null;
+
+export function ocrWords(data, scale = 1, offset = 0) {
+    return (data.blocks ?? []).flatMap(block => (block.paragraphs ?? []).flatMap(paragraph => (paragraph.lines ?? []).flatMap(line => (line.words ?? []).map(word => ({
+        text: word.text.trim(), confidence: word.confidence,
+        bbox: { x0: word.bbox.x0 / scale, y0: word.bbox.y0 / scale + offset, x1: word.bbox.x1 / scale, y1: word.bbox.y1 / scale + offset },
+    })))));
+}
 
 function loadLibrary() {
     if (typeof window.Tesseract?.createWorker === 'function') return Promise.resolve(window.Tesseract);
@@ -59,8 +69,39 @@ export class OcrEngine {
         try {
             const worker = await this.worker();
             await worker.setParameters({ tessedit_pageseg_mode: selected ? '6' : '11', preserve_interword_spaces: '1' });
-            const result = await worker.recognize(canvas);
-            return { text: result.data.text.trim(), confidence: result.data.confidence };
+            const result = await worker.recognize(canvas, {}, { blocks: true });
+            let text = result.data.text.trim();
+            let words = ocrWords(result.data);
+            const parsed = parseLabel(text);
+            if (!selected && Object.values(parsed.fields).some(values => !values.length)) {
+                const anchors = words.filter(word => isNumericDate(word.text) && word.confidence >= 50);
+                const bands = [];
+                for (const anchor of anchors) {
+                    const height = anchor.bbox.y1 - anchor.bbox.y0;
+                    if (height < 6 || bands.some(band => Math.abs(band - anchor.bbox.y0) < height * 3)) continue;
+                    bands.push(anchor.bbox.y0);
+                    if (bands.length > 2) break;
+                    const top = Math.max(0, Math.floor(anchor.bbox.y0 - height * 1.2));
+                    const bottom = Math.min(canvas.height, Math.ceil(anchor.bbox.y1 + height * 1.2));
+                    const row = document.createElement('canvas');
+                    const scale = Math.min(2, 3200 / canvas.width);
+                    row.width = Math.round(canvas.width * scale);
+                    const actualScale = row.width / canvas.width;
+                    row.height = Math.round((bottom - top) * actualScale);
+                    row.getContext('2d').drawImage(canvas, 0, top, canvas.width, bottom - top, 0, 0, row.width, row.height);
+                    await worker.setParameters({ tessedit_pageseg_mode: '6' });
+                    const reread = await worker.recognize(row, {}, { blocks: true });
+                    if (reread.data.text.trim()) text += `\n${reread.data.text.trim()}`;
+                    const rowWords = ocrWords(reread.data, actualScale, top);
+                    words = words.filter(word => !rowWords.some(value => {
+                        const overlapWidth = Math.max(0, Math.min(value.bbox.x1, word.bbox.x1) - Math.max(value.bbox.x0, word.bbox.x0));
+                        const overlapHeight = Math.max(0, Math.min(value.bbox.y1, word.bbox.y1) - Math.max(value.bbox.y0, word.bbox.y0));
+                        return overlapWidth * overlapHeight > (word.bbox.x1 - word.bbox.x0) * (word.bbox.y1 - word.bbox.y0) * 0.5;
+                    }));
+                    words.push(...rowWords);
+                }
+            }
+            return { text, confidence: result.data.confidence, words, symbols: detectSymbolLabels(canvas, words) };
         } finally { this.busy = false; }
     }
 

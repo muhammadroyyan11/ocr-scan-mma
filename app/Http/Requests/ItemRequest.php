@@ -25,6 +25,8 @@ class ItemRequest extends FormRequest
             'exp_raw' => 'nullable|string|max:255',
             'mfg_date' => 'nullable|date_format:Y-m-d|after_or_equal:1000-01-01|before_or_equal:9999-12-31',
             'exp_date' => 'nullable|date_format:Y-m-d|after_or_equal:1000-01-01|before_or_equal:9999-12-31',
+            'mfg_month' => 'nullable|date_format:Y-m|after_or_equal:1000-01|before_or_equal:9999-12',
+            'exp_month' => 'nullable|date_format:Y-m|after_or_equal:1000-01|before_or_equal:9999-12',
             'ocr_raw_text' => 'nullable|string|max:20000',
             'ocr_confidence' => 'nullable|numeric|between:0,100',
             'verification_status' => ['required', Rule::in(['verified', 'needs_review'])],
@@ -49,7 +51,12 @@ class ItemRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
-            $fields = ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'exp_raw', 'exp_date', 'ocr_raw_text'];
+            $fields = ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'mfg_month', 'exp_raw', 'exp_date', 'exp_month', 'ocr_raw_text'];
+            foreach (['mfg', 'exp'] as $field) {
+                if (filled($this->input($field.'_date')) && filled($this->input($field.'_month'))) {
+                    $validator->errors()->add($field.'_month', 'Pilih tanggal lengkap atau bulan/tahun saja, bukan keduanya.');
+                }
+            }
             if (! collect($fields)->contains(fn ($field) => filled($this->input($field)))) {
                 $validator->errors()->add('lot_number', 'Isi setidaknya satu informasi produk atau hasil OCR.');
             }
