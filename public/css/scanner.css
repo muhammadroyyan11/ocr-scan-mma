@@ -6,7 +6,7 @@
 }
 .camera-field-picker fieldset { margin: 0; padding: 0; border: 0; }
 .camera-field-picker legend { margin-bottom: 9px; font-size: 12px; font-weight: 700; }
-.camera-field-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.camera-field-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .camera-field-options label { position: relative; cursor: pointer; }
 .camera-field-options input { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; margin: 0; }
 .camera-field-options span { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 4px; border: 1px solid #859b86; border-radius: 8px; font-size: 12px; font-weight: 700; text-align: center; }
@@ -14,3 +14,6 @@
 .camera-field-options input:focus-visible + span { outline: 2px solid #eef4e7; outline-offset: 3px; }
 .camera-field-options input:disabled + span { opacity: .5; cursor: not-allowed; }
 .camera-field-picker p { margin: 10px 0 0; font-size: 11px; line-height: 1.5; }
+@media (max-width: 640px) {
+    .camera-field-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

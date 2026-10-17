@@ -31,8 +31,8 @@ async function newSession(page, reference) {
     await expect(page.locator('#scanner')).toBeVisible();
 }
 
-async function labelImage(page) {
-    const encoded = await page.evaluate(() => {
+async function labelImage(page, lines = ['LOT: ABC12345', 'MFG: 2025-12-25', 'EXP: 2027-12-30']) {
+    const encoded = await page.evaluate(lines => {
         const canvas = document.createElement('canvas');
         canvas.width = 1200;
         canvas.height = 600;
@@ -41,11 +41,9 @@ async function labelImage(page) {
         context.fillRect(0, 0, 1200, 600);
         context.fillStyle = 'black';
         context.font = 'bold 54px monospace';
-        context.fillText('LOT: ABC12345', 60, 150);
-        context.fillText('MFG: 2025-12-25', 60, 300);
-        context.fillText('EXP: 2027-12-30', 60, 450);
+        lines.forEach((line, index) => context.fillText(line, 60, 150 * (index + 1)));
         return canvas.toDataURL('image/png').split(',')[1];
-    });
+    }, lines);
     await page.locator('#image-file').setInputFiles({ name: 'label-fixture.png', mimeType: 'image/png', buffer: Buffer.from(encoded, 'base64') });
     await expect(page.locator('#image-workspace')).toBeVisible();
 }
@@ -72,6 +70,7 @@ test('login, local OCR, multiple crop areas, confirm, save, edit and CSV', async
     const scannerUrl = page.url();
     await labelImage(page);
     await expect(page.locator('#save-item')).toBeDisabled();
+    expect(await page.evaluate(() => typeof window.Tesseract)).toBe('undefined');
     await page.locator('#auto-ocr').click();
     await expect(page.locator('[name="lot_number"]')).toHaveValue('ABC12345', { timeout: 90000 });
     await expect(page.locator('[name="mfg_date"]')).toHaveValue('2025-12-25');
@@ -129,6 +128,27 @@ test('login, local OCR, multiple crop areas, confirm, save, edit and CSV', async
     expect((await download).suggestedFilename()).toMatch(/\.csv$/);
     await page.screenshot({ path: 'test-results/desktop-session.png', fullPage: true });
     expect(errors).toEqual([]);
+});
+
+test('OCR library download failure can be retried without reloading the scanner', async ({ page }) => {
+    let attempts = 0;
+    await page.route('**/vendor/ocr/tesseract.min.js', async route => {
+        attempts += 1;
+        if (attempts === 1) await route.fulfill({ status: 404, contentType: 'text/plain', body: 'Missing OCR asset' });
+        else await route.continue();
+    });
+    await login(page);
+    await newSession(page, `E2E-OCR-RETRY-${Date.now()}`);
+    await labelImage(page);
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('#scanner-error')).toContainText('Gagal memuat /vendor/ocr/tesseract.min.js');
+    await expect(page.locator('#auto-ocr')).toBeEnabled();
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('ABC12345', { timeout: 90000 });
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2025-12-25');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-12-30');
+    await expect(page.locator('#scanner-error')).toBeHidden();
+    expect(attempts).toBe(2);
 });
 
 test('fake camera capture, stop and retake release all media tracks', async ({ page }) => {
@@ -215,6 +235,157 @@ test('camera field selection routes OCR to LOT, MFG and EXP without clearing pre
     await expect(page.locator('#crop-field')).toHaveValue('AUTO');
 });
 
+test('automatic camera mode fills LOT and calendar inputs while keeping raw dates collapsed', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return { text: "ED: 11 aug 2027\\nLOT: AUTO123\\nMG: 11 agustus 2026", confidence: 95 }; } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-AUTO-FIELDS-${Date.now()}`);
+    await page.locator('#start-camera').click();
+    await page.getByRole('radio', { name: 'Otomatis', exact: true }).check();
+    await expect(page.locator('#camera-field-hint')).toContainText('field masing-masing');
+    await page.locator('#capture-image').click();
+    await expect(page.locator('#crop-field')).toHaveValue('AUTO');
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('AUTO123');
+    for (const [field, value] of [['mfg', '2026-08-11'], ['exp', '2027-08-11']]) {
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveValue(value);
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveAttribute('type', 'date');
+        await expect(page.locator(`[name="${field}_date"]`)).toBeVisible();
+        await expect(page.locator(`[name="${field}_raw"]`)).not.toBeVisible();
+    }
+    await expect(page.locator('#ocr-status')).toContainText('Success');
+    await page.locator('#confirm-scan').check();
+    const saved = page.waitForResponse(response => response.url().includes('/items') && response.request().method() === 'POST');
+    await page.locator('#save-item').click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const payload = response.request().postDataJSON();
+    expect(payload.lot_number).toBe('AUTO123');
+    expect(payload.mfg_date).toBe('2026-08-11');
+    expect(payload.exp_date).toBe('2027-08-11');
+    expect(payload.mfg_raw).toBe('11 agustus 2026');
+    expect(payload.exp_raw).toBe('11 aug 2027');
+});
+
+test('automatic detection does not guess unlabeled dates, overwrite manual dates or choose conflicting candidates', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return window.scannerTestResults.shift(); } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-AUTO-SAFETY-${Date.now()}`);
+    await page.evaluate(() => {
+        window.scannerTestResults = [
+            { text: '11 agustus 2026', confidence: 95 },
+            { text: 'LOT: AUTO124\nMG: 11 agustus 2026\nED: 11 aug 2027', confidence: 95 },
+            { text: 'MFG: 11 aug 2026\nMFG: 12 aug 2026\nEXP: 11 aug 2027', confidence: 95 },
+        ];
+    });
+    await page.locator('#start-camera').click();
+    await page.getByRole('radio', { name: 'Otomatis', exact: true }).check();
+    await page.locator('#capture-image').click();
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('#parser-warnings')).toContainText('Jenis data belum dikenali');
+    await expect(page.locator('#ocr-status')).toHaveText('Needs Review');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('');
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('');
+    await page.locator('[name="mfg_date"]').fill('2020-01-01');
+    await page.locator('#confirm-scan').check();
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('AUTO124');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2020-01-01');
+    await expect(page.locator('[name="mfg_raw"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-08-11');
+    await expect(page.locator('#confirm-scan')).not.toBeChecked();
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#next-item').click();
+    await page.locator('#start-camera').click();
+    await page.getByRole('radio', { name: 'Otomatis', exact: true }).check();
+    await page.locator('#capture-image').click();
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('#parser-warnings')).toContainText('MFG memiliki beberapa kandidat');
+    await expect(page.locator('#ocr-status')).toHaveText('Needs Review');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('');
+    await expect(page.locator('[name="mfg_raw"]')).toHaveValue('');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-08-11');
+});
+
+test('real OCR reads Indonesian MFG and English expiry month names', async ({ page }) => {
+    await login(page);
+    await newSession(page, `E2E-DATE-NAMES-${Date.now()}`);
+    await labelImage(page, ['LOT: DATES123', 'MG: 11 agustus 2026', 'ED: 11 aug 2027']);
+    await page.locator('#auto-ocr').click();
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('2026-08-11', { timeout: 90000 });
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2027-08-11');
+    await expect(page.locator('[name="lot_number"]')).toHaveValue('DATES123');
+});
+
+test('camera MFG and ED scans preserve dotted dates until the format and century are confirmed', async ({ page }) => {
+    await page.route('**/js/scanner/ocr-engine.js', route => route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class OcrEngine { async recognize() { return window.scannerTestResults.shift(); } async terminate() {} }',
+    }));
+    await login(page);
+    await newSession(page, `E2E-DATE-FORMATS-${Date.now()}`);
+    await page.evaluate(() => {
+        window.scannerTestResults = [
+            { text: 'MG: 11 agustus 2026', confidence: 95 },
+            { text: 'ED: 11 aug 2027', confidence: 95 },
+            { text: '26.08.11', confidence: 95 },
+            { text: '27.08.11', confidence: 95 },
+        ];
+    });
+    for (const [index, field] of ['mfg', 'exp', 'mfg', 'exp'].entries()) {
+        await page.locator(index === 0 ? '#start-camera' : '#retake').click();
+        await page.getByRole('radio', { name: field === 'mfg' ? 'MG / MFG' : 'Expired Date', exact: true }).check();
+        await page.locator('#capture-image').click();
+        await page.locator('#auto-ocr').click();
+        await expect(page.locator('.crop-card')).toHaveCount(index + 1);
+        if (index < 2) {
+            await expect(page.locator(`[name="${field}_date"]`)).toHaveValue(field === 'mfg' ? '2026-08-11' : '2027-08-11');
+            continue;
+        }
+        await expect(page.locator(`[name="${field}_raw"]`)).toHaveValue(field === 'mfg' ? '26.08.11' : '27.08.11');
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveValue('');
+        await expect(page.locator(`[data-date-options="${field}"]`)).toHaveAttribute('open', '');
+        await expect(page.locator(`[data-date-feedback="${field}"]`)).toContainText('Tahun dua digit');
+        await page.locator(`[data-date-format="${field}"]`).selectOption('YY.MM.DD');
+        await page.locator(`[data-interpret-date="${field}"]`).click();
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveValue('');
+        await page.locator(`[data-century="${field}"]`).selectOption('2000');
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveValue(field === 'mfg' ? '2026-08-11' : '2027-08-11');
+        await page.locator(`[data-interpret-date="${field}"]`).click();
+        await expect(page.locator(`[name="${field}_date"]`)).toHaveValue(field === 'mfg' ? '2026-08-11' : '2027-08-11');
+    }
+    await page.locator('#confirm-scan').check();
+    await page.locator('[data-date-format="exp"]').selectOption('DD.MM.YY');
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2011-08-27');
+    await expect(page.locator('#confirm-scan')).not.toBeChecked();
+    await page.locator('[data-interpret-date="exp"]').click();
+    await expect(page.locator('[name="exp_date"]')).toHaveValue('2011-08-27');
+    await expect(page.locator('#date-order-warning')).toBeVisible();
+    await page.locator('[data-date-format="exp"]').selectOption('YY.MM.DD');
+    await page.locator('[data-interpret-date="exp"]').click();
+    await expect(page.locator('#date-order-warning')).toBeHidden();
+    await page.locator('[data-century="mfg"]').selectOption('1900');
+    await expect(page.locator('[name="mfg_date"]')).toHaveValue('1926-08-11');
+    await page.locator('[data-century="mfg"]').selectOption('2000');
+    await page.locator('[data-interpret-date="mfg"]').click();
+    await page.locator('#confirm-scan').check();
+    const saved = page.waitForResponse(response => response.url().includes('/items') && response.request().method() === 'POST');
+    await page.locator('#save-item').click();
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const payload = response.request().postDataJSON();
+    expect(payload.mfg_raw).toBe('26.08.11');
+    expect(payload.mfg_date).toBe('2026-08-11');
+    expect(payload.exp_raw).toBe('27.08.11');
+    expect(payload.exp_date).toBe('2027-08-11');
+});
+
 test('mobile has no page overflow and touch crop uses image coordinates', async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
@@ -239,6 +410,9 @@ test('mobile has no page overflow and touch crop uses image coordinates', async 
     await expect(page.locator('#crop-area')).toBeEnabled();
     await page.locator('#crop-area').click();
     await expect(page.locator('#crop-preview canvas')).toBeVisible();
+    await page.locator('[data-date-source="mfg"] summary').click();
+    await page.locator('[name="mfg_raw"]').fill('26.08.11');
+    await expect(page.locator('[data-date-options="mfg"]')).toHaveAttribute('open', '');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: 'test-results/mobile-scanner.png', fullPage: true });
     await context.close();

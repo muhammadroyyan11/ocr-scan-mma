@@ -1,7 +1,11 @@
-const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-const fullMonths = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
-const monthNumber = value => Math.max(months.indexOf(value), fullMonths.indexOf(value), value === 'SEPT' ? 8 : -1) + 1;
-const labelPattern = /\b(LOT\s+NUMBER|LOT\s+NO\.?|BATCH\s+NUMBER|BATCH\s+NO\.?|PRODUCTION\s+DATE|PROD\s+DATE|MANUFACTUR(?:ED|ING)(?:\s+DATE)?|MFG\s+DATE|EXPIRATION\s+DATE|EXPIRY(?:\s+DATE)?|EXP\s+DATE|USE\s+BEFORE|BEST\s+BEFORE|USE\s+BY|LOT|BATCH|MFG|MFD|EXP)\b[\s.:#-]*/gi;
+const monthNames = [
+    ['JAN', 'JANUARY', 'JANUARI'], ['FEB', 'FEBRUARY', 'FEBRUARI'], ['MAR', 'MARCH', 'MARET'],
+    ['APR', 'APRIL'], ['MAY', 'MEI'], ['JUN', 'JUNE', 'JUNI'], ['JUL', 'JULY', 'JULI'],
+    ['AUG', 'AUGUST', 'AGU', 'AGT', 'AGST', 'AGUSTUS'], ['SEP', 'SEPT', 'SEPTEMBER'],
+    ['OCT', 'OCTOBER', 'OKT', 'OKTOBER'], ['NOV', 'NOVEMBER', 'NOP', 'NOPEMBER'], ['DEC', 'DECEMBER', 'DES', 'DESEMBER'],
+];
+const monthNumber = value => monthNames.findIndex(names => names.includes(value)) + 1;
+const labelPattern = /\b(LOT\s+NUMBER|LOT\s+NO\.?|BATCH\s+NUMBER|BATCH\s+NO\.?|PRODUCTION\s+DATE|PROD\s+DATE|MANUFACTUR(?:ED|ING)(?:\s+DATE)?|MFG\s+DATE|MG\s+DATE|EXPIRATION\s+DATE|EXPIRY(?:\s+DATE)?|EXPIRED(?:\s+DATE)?|EXP\s+DATE|ED\s+DATE|USE\s+BEFORE|BEST\s+BEFORE|USE\s+BY|LOT|BATCH|MFG|MFD|EXP|MG|ED)\b[\s.:#-]*/gi;
 
 function isoDate(year, month, day) {
     if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return null;
@@ -20,13 +24,23 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
     };
     let matched = false;
     let match;
-    if ((match = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) {
+    if ((match = value.match(/^(\d{4})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{1,2})$/))) {
         matched = true;
-        add(match[1], match[2], match[3], 'YYYY-MM-DD');
-    } else if ((match = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/))) {
+        if (!format || format === 'YYYY-MM-DD') add(match[1], match[3], match[4], 'YYYY-MM-DD');
+    } else if ((match = value.match(/^(\d{1,2})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{4})$/))) {
         matched = true;
-        if (!format || format === 'DD/MM/YYYY') add(match[3], match[2], match[1], 'DD/MM/YYYY');
-        if (!format || format === 'MM/DD/YYYY') add(match[3], match[1], match[2], 'MM/DD/YYYY');
+        if (!format || format === 'DD/MM/YYYY') add(match[4], match[3], match[1], 'DD/MM/YYYY');
+        if (!format || format === 'MM/DD/YYYY') add(match[4], match[1], match[3], 'MM/DD/YYYY');
+    } else if ((match = value.match(/^(\d{1,2})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{2})$/))) {
+        matched = true;
+        if (!['YY.MM.DD', 'DD.MM.YY', 'MM.DD.YY'].includes(format) || ![1900, 2000, 2100].includes(Number(century))) {
+            result.status = 'ambiguous';
+            result.warnings.push('Tahun dua digit: pilih urutan YY.MM.DD, DD.MM.YY, atau MM.DD.YY DAN abad secara eksplisit. Berlaku juga untuk pemisah / dan -; tidak ada asumsi tahun.');
+            return result;
+        }
+        if (format === 'YY.MM.DD' && match[1].length === 2) add(Number(century) + Number(match[1]), match[3], match[4], format);
+        if (format === 'DD.MM.YY') add(Number(century) + Number(match[4]), match[3], match[1], format);
+        if (format === 'MM.DD.YY') add(Number(century) + Number(match[4]), match[1], match[3], format);
     } else if (/^\d{8}$/.test(value)) {
         matched = true;
         if (!format || format === 'DDMMYYYY') add(value.slice(4), value.slice(2, 4), value.slice(0, 2), 'DDMMYYYY');
@@ -40,11 +54,11 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
         }
         if (format === 'YYMMDD') add(Number(century) + Number(value.slice(0, 2)), value.slice(2, 4), value.slice(4), format);
         if (format === 'DDMMYY') add(Number(century) + Number(value.slice(4)), value.slice(2, 4), value.slice(0, 2), format);
-    } else if ((match = value.match(/^(\d{1,2})[\s-]+([A-Z]+)[\s-]+(\d{4})$/))) {
+    } else if ((match = value.match(/^(\d{1,2})[\s./-]+([A-Z]+)[\s./-]+(\d{4})$/))) {
         matched = true;
         const month = monthNumber(match[2]);
         add(match[3], month, match[1], 'DD MON YYYY');
-    } else if (/^[A-Z]+[\s/-]+\d{4}$/.test(value) && monthNumber(value.split(/[\s/-]/)[0])) {
+    } else if ((/^[A-Z]+[\s./-]+\d{4}$/.test(value) && monthNumber(value.split(/[\s./-]/)[0])) || /^(0?[1-9]|1[0-2])[./-]\d{4}$/.test(value)) {
         result.status = 'incomplete';
         result.warnings.push('Label hanya memiliki bulan dan tahun. Hari tidak ditentukan; simpan teks mentah atau isi tanggal setelah verifikasi.');
         return result;
@@ -61,7 +75,7 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
     } else {
         result.warnings.push('Format tanggal belum dikenali. Teks mentah dipertahankan.');
     }
-    if (suggestCorrections && /^[0-9OISB/\s-]+$/.test(value) && /[OISB]/.test(value)) {
+    if (suggestCorrections && /^[0-9OISB/.\s-]+$/.test(value) && /[OISB]/.test(value)) {
         const suggestion = value.replace(/O/g, '0').replace(/I/g, '1').replace(/S/g, '5').replace(/B/g, '8');
         const interpreted = parseDate(suggestion, { format, century, suggestCorrections: false });
         result.corrections.push({ text: suggestion, candidates: interpreted.candidates, status: interpreted.status });
@@ -80,7 +94,7 @@ export function parseLabel(text, confidence = null) {
     const fields = { LOT: [], MFG: [], EXP: [] };
     matches.forEach((match, index) => {
         const keyword = match[1].toUpperCase();
-        const field = /^(LOT|BATCH)/.test(keyword) ? 'LOT' : /^(EXP|USE|BEST)/.test(keyword) ? 'EXP' : 'MFG';
+        const field = /^(LOT|BATCH)/.test(keyword) ? 'LOT' : /^(EXP|ED|USE|BEST)/.test(keyword) ? 'EXP' : 'MFG';
         const remaining = raw.slice(match.index + match[0].length, matches[index + 1]?.index ?? raw.length);
         const value = remaining.split('\n').map(part => part.trim()).find(Boolean)?.replace(/[;,|]+$/, '').trim() ?? '';
         if (!value) return;
@@ -91,7 +105,7 @@ export function parseLabel(text, confidence = null) {
         if (candidates.length > 1) warnings.push(`${field} memiliki beberapa kandidat; pilih secara manual.`);
         candidates.forEach(candidate => warnings.push(...(candidate.date?.warnings ?? [])));
     }
-    const unassigned = matches.length ? [] : raw.match(/\b\d{6,8}\b|\b\d{1,4}[/-]\d{1,2}[/-]\d{2,4}\b/g) ?? [];
+    const unassigned = matches.length ? [] : raw.match(/\b\d{1,4}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{6,8}\b/g) ?? [];
     if (unassigned.length) warnings.push('Kode tanpa keyword ditemukan. Tidak otomatis dianggap MFG atau EXP.');
     if (!raw.trim()) warnings.push('OCR belum menghasilkan teks. Coba crop, preset lain, atau isi manual.');
     warnings.push(...dateOrderWarnings(fields.MFG[0]?.date?.date, fields.EXP[0]?.date?.date));

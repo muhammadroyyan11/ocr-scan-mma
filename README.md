@@ -106,10 +106,13 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
 ## Alur Pemakaian
 
 1. Buat sesi penerimaan; supplier, referensi, kode gudang, dan catatan opsional.
-2. Pilih **Mulai kamera**, izinkan akses, lalu pilih **LOT**, **MG / MFG** (tanggal produksi),
+2. Pilih **Mulai kamera**, izinkan akses, lalu pilih **Otomatis**, **LOT**, **MG / MFG** (tanggal produksi),
    atau **Expired Date** langsung di tampilan kamera. Pilihan wajib sebelum **Ambil foto** aktif.
    Arahkan ke tulisan yang dipilih, ambil foto, lalu tekan **Baca LOT / MG / MFG / Expired Date**.
-   Hasil OCR hanya mengisi field yang dipilih dan ditambahkan ke riwayat area.
+   Mode **Otomatis** mengenali penanda LOT/BATCH, MG/MFG/MFD, serta ED/EXP dan mengisi field masing-masing.
+   Tanggal valid langsung mengisi input kalender MG dan ED; teks asli tersimpan di bagian yang dapat dibuka.
+   Mode satu field hanya mengisi field yang dipilih dan menambah riwayat area.
+   Tanpa penanda jenis, sistem tidak menebak apakah tanggal adalah MG atau ED; pilih mode satu field.
    Gunakan **Foto ulang**, pilih field berikutnya, lalu ulangi tanpa menghapus hasil sebelumnya.
    Alternatif: **Pilih foto** JPEG/PNG/WebP, maksimal 15 MB / 40 MP. Foto tidak dikirim ke server.
 3. Kamera belakang diutamakan. Ganti kamera dan lampu hanya aktif jika hardware mendukung.
@@ -141,7 +144,13 @@ Preview asli tetap bersih: rectangle berada pada canvas overlay terpisah, tidak 
 - LOT Number opsional. Jika tercantum, OCR mengenali LOT / LOT NUMBER / BATCH dan pengguna
   dapat mengoreksi nilainya. Jika tidak ada atau tidak terbaca, biarkan kosong; item tetap
   dapat disimpan dengan informasi produk atau hasil scan lain, setelah dikonfirmasi.
-- ISO `YYYY-MM-DD`, `DD/MM/YYYY`, `DD-MM-YYYY`, `DDMMYYYY`, `YYYYMMDD`, dan nama bulan Inggris.
+- ISO `YYYY-MM-DD`, tanggal numerik dengan pemisah titik/strip/garis miring, `DDMMYYYY`,
+  `YYYYMMDD`, serta nama/singkatan bulan Indonesia dan Inggris didukung.
+  `11 agustus 2026`, `11 aug 2026`, dan `2026.08.11` dibaca sebagai `2026-08-11`.
+- `26.08.11` tidak ditebak: pilih **YY.MM.DD** dan **2000-2099** untuk `2026-08-11`,
+  atau **DD.MM.YY** dan **2000-2099** untuk `2011-08-26`. Pilihan interpretasi otomatis terbuka
+  jika hasil scan MG/MFG atau ED/EXP ambigu. Setelah format dan abad dipilih, input tanggal langsung
+  diperbarui otomatis jika valid; pilihan yang belum lengkap/invalid mengosongkan tanggal lama.
 - `03/04/2025` menampilkan dua kandidat; tidak diisi otomatis. Pilih format pada
   **Interpretasi kode tanggal**, lalu **Interpretasikan**.
 - Kode enam digit memerlukan pilihan **YYMMDD atau DDMMYY sekaligus abad** 1900/2000/2100.
@@ -261,6 +270,9 @@ berhak dapat membacanya. Aplikasi tidak menyimpan bukti foto dan tidak menyediak
 Semua aset OCR dilayani dari `/vendor/ocr/`: JS, worker, semua varian WASM core,
 dan `lang/eng.traineddata.gz`. Docker build menyalin dependency yang dikunci `package-lock.json`;
 tidak ada fallback CDN tersembunyi. Font juga lokal.
+
+Library OCR dimuat saat tombol Baca/OCR ditekan; proses menunggu sampai library siap.
+Jika pemuatan gagal, tombol yang sama dapat dicoba lagi tanpa memuat ulang halaman.
 
 Untuk menyiapkan aset tanpa build Docker (Node 20+):
 

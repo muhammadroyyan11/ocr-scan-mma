@@ -24,12 +24,14 @@ export class ItemForm {
         form.addEventListener('input', event => {
             if (event.target === this.confirmation) this.syncSave();
             else {
-                if (/^(mfg|exp)_raw$/.test(event.target.name)) this.field(event.target.name.replace('_raw', '_date')).value = '';
+                if (/^(mfg|exp)_raw$/.test(event.target.name)) this.syncDate(event.target.name.replace('_raw', ''));
                 this.markDirty();
                 this.updateDateFeedback();
             }
         });
         form.addEventListener('change', event => {
+            const dateField = event.target.dataset.dateFormat || event.target.dataset.century;
+            if (dateField) this.syncDate(dateField);
             if (event.target !== this.confirmation) this.markDirty();
             this.updateDateFeedback();
             this.syncSave();
@@ -53,9 +55,7 @@ export class ItemForm {
         }));
         form.querySelectorAll('[data-interpret-date]').forEach(button => button.addEventListener('click', () => {
             const field = button.dataset.interpretDate;
-            const result = this.interpret(field);
-            if (result.date) this.field(`${field}_date`).value = result.date;
-            else this.field(`${field}_date`).value = '';
+            this.syncDate(field);
             this.markDirty();
             this.updateDateFeedback();
         }));
@@ -86,15 +86,20 @@ export class ItemForm {
         return parseDate(this.field(`${field}_raw`).value, { format: this.form.querySelector(`[data-date-format="${field}"]`).value, century: this.form.querySelector(`[data-century="${field}"]`).value });
     }
 
+    syncDate(field) {
+        this.field(`${field}_date`).value = this.interpret(field).date ?? '';
+    }
+
     updateDateFeedback() {
         for (const field of ['mfg', 'exp']) {
             const result = this.interpret(field);
             const output = this.form.querySelector(`[data-date-feedback="${field}"]`);
             const confirmed = this.field(`${field}_date`).value;
             const messages = [...result.warnings];
+            if (result.status === 'ambiguous') this.form.querySelector(`[data-date-options="${field}"]`).open = true;
             if (result.date) messages.unshift(`Interpretasi: ${result.date} (${result.candidates[0].format}). Periksa sebelum konfirmasi.`);
             if (confirmed) messages.push(`Tanggal yang akan disimpan: ${confirmed}.`);
-            else if (result.raw.trim()) messages.push('Belum diverifikasi: hanya teks mentah yang akan disimpan.');
+            else if (result.raw.trim()) messages.push(`Hasil scan: "${result.raw}". Tanggal belum diisi; pastikan format atau koreksi teks asli hasil scan.`);
             if (result.candidates.length > 1) messages.push(`Kandidat: ${result.candidates.map(candidate => `${candidate.date} / ${candidate.format}`).join(' atau ')}.`);
             output.textContent = messages.join(' ');
         }
@@ -111,7 +116,7 @@ export class ItemForm {
             if (overwrite || !this.field('lot_number').value) this.field('lot_number').value = candidate.raw.slice(0, 255);
         } else {
             const prefix = field.toLowerCase();
-            if (overwrite || !this.field(`${prefix}_raw`).value) {
+            if (overwrite || (!this.field(`${prefix}_raw`).value && !this.field(`${prefix}_date`).value)) {
                 this.field(`${prefix}_raw`).value = candidate.raw.slice(0, 255);
                 this.field(`${prefix}_date`).value = candidate.date?.date ?? '';
                 this.form.querySelector(`[data-date-format="${prefix}"]`).value = '';
@@ -157,6 +162,9 @@ export class ItemForm {
 
     analyze(text, confidence = null, fill = true) {
         const parsed = parseLabel(text, confidence);
+        if (parsed.raw.trim() && Object.values(parsed.fields).every(candidates => !candidates.length)) {
+            parsed.warnings.push('Jenis data belum dikenali. Sertakan penanda LOT/BATCH, MG/MFG, atau ED/EXP pada foto, atau pilih jenis scan secara manual.');
+        }
         this.renderCandidates(parsed);
         if (fill && !this.locked) for (const candidates of Object.values(parsed.fields)) if (candidates.length === 1) this.fillCandidate(candidates[0], false);
         return parsed;

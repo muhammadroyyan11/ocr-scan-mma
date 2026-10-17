@@ -20,7 +20,7 @@ function initializeScanner() {
     let closing = false;
     let cameraField = null;
     let imageField = 'AUTO';
-    const fieldLabels = { LOT: 'LOT', MFG: 'MG / MFG', EXP: 'Expired Date' };
+    const fieldLabels = { AUTO: 'Otomatis', LOT: 'LOT', MFG: 'MG / MFG', EXP: 'Expired Date' };
     let savedCount = Number.parseInt(element('saved-count').textContent, 10) || 0;
     const camera = new Camera(element('camera-video'), () => updateControls());
     const cropper = new ImageCropper(element('captured-image'), element('crop-overlay'), () => updateControls());
@@ -53,9 +53,9 @@ function initializeScanner() {
         element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
         element('camera-field-picker').hidden = !state.running;
         element('camera-field-picker').querySelectorAll('input').forEach(control => { control.disabled = busy; });
-        element('camera-field-hint').textContent = cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Pilih LOT, MG / MFG, atau Expired Date sebelum mengambil foto.';
+        element('camera-field-hint').textContent = cameraField === 'AUTO' ? 'Foto seluruh label beserta penanda LOT, MG/MFG, dan ED/EXP. Hasilnya masuk ke field masing-masing; tanggal valid langsung mengisi kalender.' : cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Pilih Otomatis, LOT, MG / MFG, atau Expired Date sebelum mengambil foto.';
         element('capture-image').disabled = busy || !state.running || !cameraField;
-        element('capture-image').textContent = cameraField ? `Ambil foto ${fieldLabels[cameraField]}` : 'Ambil foto';
+        element('capture-image').textContent = cameraField === 'AUTO' ? 'Ambil foto label' : cameraField ? `Ambil foto ${fieldLabels[cameraField]}` : 'Ambil foto';
         element('auto-ocr').firstChild.textContent = imageField === 'AUTO' ? 'OCR otomatis ' : `Baca ${fieldLabels[imageField]} `;
         element('image-file').disabled = busy;
         element('next-item').disabled = busy;
@@ -218,6 +218,7 @@ function initializeScanner() {
             if (selected) { element('crop-preview').replaceChildren(processed); element('crop-preview').hidden = false; }
             const result = await engine.recognize(processed, selected);
             if (closing) return;
+            let needsReview = !result.text || result.confidence < 70;
             form.field('ocr_confidence').value = Number(result.confidence).toFixed(2);
             if (!selected) {
                 const existing = form.field('ocr_raw_text').value;
@@ -234,11 +235,14 @@ function initializeScanner() {
                 form.scans.push(scan);
                 addCropCard(crop.canvas, scan);
                 if (result.text.trim()) applyScan(scan);
+                if (field === 'MFG' || field === 'EXP') needsReview ||= !parseDate(scan.normalized_text).date;
             } else {
-                form.analyze(result.text, result.confidence);
+                const parsed = form.analyze(result.text, result.confidence);
+                const candidates = Object.values(parsed.fields).flat();
+                needsReview ||= !candidates.length || Object.values(parsed.fields).some(values => values.length > 1) || candidates.some(candidate => candidate.date && !candidate.date.date);
             }
             form.markDirty();
-            status(result.text && result.confidence >= 70 ? 'Success / Periksa hasil' : 'Needs Review', result.text && result.confidence >= 70 ? 'green' : 'amber');
+            status(needsReview ? 'Needs Review' : 'Success / Periksa hasil', needsReview ? 'amber' : 'green');
             if (!result.text) notify('Belum ada teks terbaca. Coba area lebih dekat atau preset lain.', true);
         } catch (failure) { if (!closing) showError(failure); }
         finally {

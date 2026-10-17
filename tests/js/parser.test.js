@@ -92,6 +92,80 @@ test('compact and named dates are supported', () => {
     assert.equal(parseDate('DECORATION 2027').status, 'unknown');
 });
 
+test('Indonesian and English month names and abbreviations preserve the scanned text', () => {
+    const examples = [
+        ['Januari', 'Jan', 'January'], ['Februari', 'Feb', 'February'], ['Maret', 'Mar', 'March'],
+        ['April', 'Apr'], ['Mei', 'May'], ['Juni', 'Jun', 'June'], ['Juli', 'Jul', 'July'],
+        ['agustus', 'aug', 'AGU', 'AGT', 'AGST', 'August'], ['September', 'Sept', 'Sep'],
+        ['Oktober', 'Okt', 'October', 'Oct'], ['November', 'Nov'], ['Desember', 'Des', 'December', 'Dec'],
+    ];
+    for (const [month, names] of examples.entries()) {
+        for (const name of names) {
+            const raw = `11 ${name} 2026`;
+            const result = parseDate(raw);
+            assert.equal(result.date, `2026-${String(month + 1).padStart(2, '0')}-11`, raw);
+            assert.equal(result.raw, raw);
+        }
+    }
+    assert.equal(parseDate('11-Agustus-2026').date, '2026-08-11');
+    assert.equal(parseDate('11 AUG. 2026').date, '2026-08-11');
+    assert.equal(parseDate('11\nagustus\n2026').date, '2026-08-11');
+    assert.equal(parseDate('11 AGUSTUSS 2026').date, null);
+});
+
+test('dotted, slashed and dashed full-year dates validate calendar and ambiguity', () => {
+    for (const separator of ['.', '/', '-']) {
+        assert.equal(parseDate(`2026${separator}08${separator}11`).date, '2026-08-11');
+        assert.equal(parseDate(`25${separator}08${separator}2026`).date, '2026-08-25');
+        assert.equal(parseDate(`11${separator}08${separator}2026`).status, 'ambiguous');
+        assert.equal(parseDate(`11${separator}08${separator}2026`, { format: 'DD/MM/YYYY' }).date, '2026-08-11');
+        assert.equal(parseDate(`11${separator}08${separator}2026`, { format: 'MM/DD/YYYY' }).date, '2026-11-08');
+        assert.equal(parseDate(`31${separator}02${separator}2026`).status, 'invalid');
+    }
+    assert.equal(parseDate('2026 . 08 . 11').date, '2026-08-11');
+    assert.equal(parseDate('2026.08-11').date, null);
+    assert.equal(parseDate('2026.08.11', { format: 'DD/MM/YYYY' }).date, null);
+});
+
+test('separated two-digit years require both an explicit format and century', () => {
+    for (const raw of ['26.08.11', '26/08/11', '26-08-11']) {
+        assert.equal(parseDate(raw).status, 'ambiguous');
+        assert.equal(parseDate(raw).date, null);
+        assert.equal(parseDate(raw, { format: 'YY.MM.DD' }).date, null);
+        assert.equal(parseDate(raw, { century: 2000 }).date, null);
+        assert.equal(parseDate(raw, { format: 'YY.MM.DD', century: 2000 }).date, '2026-08-11');
+        assert.equal(parseDate(raw, { format: 'DD.MM.YY', century: 2000 }).date, '2011-08-26');
+        assert.equal(parseDate(raw, { format: 'YY.MM.DD', century: 1900 }).date, '1926-08-11');
+        assert.equal(parseDate(raw, { format: 'YY.MM.DD', century: 2100 }).date, '2126-08-11');
+        assert.equal(parseDate(raw, { format: 'YY.MM.DD', century: 1800 }).date, null);
+    }
+    assert.equal(parseDate('08.11.26', { format: 'MM.DD.YY', century: 2000 }).date, '2026-08-11');
+    assert.equal(parseDate('26.02.29', { format: 'YY.MM.DD', century: 2000 }).status, 'invalid');
+    assert.equal(parseDate('24.02.29', { format: 'YY.MM.DD', century: 2000 }).date, '2024-02-29');
+});
+
+test('month-only dates never invent a day for either language or numeric separators', () => {
+    for (const raw of ['AGUSTUS 2026', 'Aug 2026', 'DES.2026', '08.2026', '08/2026']) {
+        assert.equal(parseDate(raw).status, 'incomplete', raw);
+        assert.equal(parseDate(raw).date, null, raw);
+    }
+    assert.equal(parseDate('31 Februari 2026').status, 'invalid');
+    assert.equal(parseDate('29 Februari 2024').date, '2024-02-29');
+});
+
+test('MG, ED and Expired Date labels route dates to MFG and EXP without touching LOT', () => {
+    const result = parseLabel('MG: 11 agustus 2026\nED: 11 aug 2027\nLOT: MGED26.08.11');
+    assert.equal(result.fields.MFG[0].raw, '11 agustus 2026');
+    assert.equal(result.fields.MFG[0].date.date, '2026-08-11');
+    assert.equal(result.fields.EXP[0].raw, '11 aug 2027');
+    assert.equal(result.fields.EXP[0].date.date, '2027-08-11');
+    assert.equal(result.fields.LOT[0].raw, 'MGED26.08.11');
+    assert.equal(parseLabel('Expired Date: 11 aug 2026').fields.EXP[0].date.date, '2026-08-11');
+    assert.equal(parseLabel('MG 26.08.11 ED 27.08.11').fields.MFG[0].date.status, 'ambiguous');
+    assert.deepEqual(parseLabel('26.08.11').unassigned, ['26.08.11']);
+    assert.equal(parseLabel('26.08.11').fields.EXP.length, 0);
+});
+
 test('date order warnings never rewrite values', () => {
     const result = parseLabel('EXP 2024-12-25 MFG 2025-12-25');
     assert.ok(result.warnings.some(warning => warning.includes('lebih awal')));
@@ -113,6 +187,10 @@ test('OCR confusions are contextual suggestions only', () => {
     assert.equal(result.raw, '2O25-12-3O');
     assert.equal(result.corrections[0].text, '2025-12-30');
     assert.equal(parseDate('2O25-12-3O').corrections[0].candidates[0].date, '2025-12-30');
+    const dotted = parseDate('2O26.O8.11');
+    assert.equal(dotted.date, null);
+    assert.equal(dotted.raw, '2O26.O8.11');
+    assert.equal(dotted.corrections[0].candidates[0].date, '2026-08-11');
 });
 
 test('touch and mouse map displayed coordinates into original pixels', () => {
