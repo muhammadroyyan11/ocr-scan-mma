@@ -38,10 +38,20 @@ export class ItemForm {
             this.syncSave();
         });
         form.addEventListener('submit', event => { event.preventDefault(); this.save(); });
+        form.addEventListener('invalid', event => {
+            let parent = event.target.parentElement;
+            while (parent && parent !== form) {
+                if (parent.tagName === 'DETAILS') parent.open = true;
+                parent = parent.parentElement;
+            }
+        }, true);
         form.querySelector('#parse-text').addEventListener('click', () => this.analyze(this.field('ocr_raw_text').value));
         form.querySelector('#clear-fields').addEventListener('click', () => {
             if (!window.confirm('Kosongkan field hasil scan? Riwayat crop tidak dihapus.')) return;
-            for (const name of ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'mfg_month', 'exp_raw', 'exp_date', 'exp_month', 'ocr_raw_text', 'ocr_confidence', 'notes']) this.field(name).value = '';
+            for (const name of ['product_name', 'product_reference', 'barcode', 'lot_number', 'mfg_raw', 'mfg_date', 'mfg_month', 'exp_raw', 'exp_date', 'exp_month', 'ocr_raw_text', 'ocr_confidence', 'notes']) {
+                const input = this.field(name);
+                if (input) input.value = '';
+            }
             for (const field of ['mfg', 'exp']) this.setDatePrecision(field, 'day');
             this.field('verification_status').value = 'needs_review';
             this.markDirty();
@@ -52,7 +62,8 @@ export class ItemForm {
             const field = button.dataset.clearField;
             this.field(`${field}_raw`).value = '';
             this.field(`${field}_date`).value = '';
-            this.field(`${field}_month`).value = '';
+            const month = this.field(`${field}_month`);
+            if (month) month.value = '';
             this.setDatePrecision(field, 'day');
             this.markDirty();
             this.updateDateFeedback();
@@ -67,7 +78,7 @@ export class ItemForm {
             if (this.dirty && !window.confirm('Item memiliki perubahan yang belum disimpan. Buang perubahan dan lanjutkan?')) return;
             this.reset();
         });
-        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`).value ? 'month' : 'day');
+        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`)?.value ? 'month' : 'day');
         this.updateDateFeedback();
         this.syncSave();
         window.addEventListener('beforeunload', event => {
@@ -95,30 +106,40 @@ export class ItemForm {
         const result = this.interpret(field);
         this.setDatePrecision(field, result.month ? 'month' : 'day');
         this.field(`${field}_date`).value = result.date ?? '';
-        this.field(`${field}_month`).value = result.month ?? '';
+        const month = this.field(`${field}_month`);
+        if (month) month.value = result.month ?? '';
     }
 
     setDatePrecision(field, precision) {
-        this.form.querySelector(`[data-date-precision="${field}"]`).value = precision;
-        this.form.querySelector(`[data-date-day="${field}"]`).hidden = precision === 'month';
-        this.form.querySelector(`[data-date-month="${field}"]`).hidden = precision !== 'month';
-        this.field(`${field}_${precision === 'month' ? 'date' : 'month'}`).value = '';
+        if (precision === 'month' && !this.field(`${field}_month`)) precision = 'day';
+        const control = this.form.querySelector(`[data-date-precision="${field}"]`);
+        const dayLabel = this.form.querySelector(`[data-date-day="${field}"]`);
+        const monthLabel = this.form.querySelector(`[data-date-month="${field}"]`);
+        const other = this.field(`${field}_${precision === 'month' ? 'date' : 'month'}`);
+        if (control) control.value = precision;
+        if (dayLabel) dayLabel.hidden = precision === 'month';
+        if (monthLabel) monthLabel.hidden = precision !== 'month';
+        if (other) other.value = '';
     }
 
     updateDateFeedback() {
         for (const field of ['mfg', 'exp']) {
             const result = this.interpret(field);
             const output = this.form.querySelector(`[data-date-feedback="${field}"]`);
-            const confirmed = this.field(`${field}_date`).value || this.field(`${field}_month`).value;
+            const confirmed = this.field(`${field}_date`).value || this.field(`${field}_month`)?.value;
             const messages = [...result.warnings];
+            if (result.month && !this.field(`${field}_month`)) messages.push('HTML halaman belum mendukung input bulan/tahun. Teks asli dipertahankan; muat ulang setelah deployment app dan web selesai.');
             if (result.status === 'ambiguous') this.form.querySelector(`[data-date-options="${field}"]`).open = true;
             if (result.date) messages.unshift(`Interpretasi: ${result.date} (${result.candidates[0].format}). Periksa sebelum konfirmasi.`);
             if (confirmed) messages.push(`${confirmed.length === 7 ? 'Bulan/tahun' : 'Tanggal'} yang akan disimpan: ${confirmed}.`);
             else if (result.raw.trim()) messages.push(`Hasil scan: "${result.raw}". Tanggal belum diisi; pastikan format atau koreksi teks asli hasil scan.`);
             if (result.candidates.length > 1) messages.push(`Kandidat: ${result.candidates.map(candidate => `${candidate.date} / ${candidate.format}`).join(' atau ')}.`);
-            output.textContent = messages.join(' ');
+            if (this.form.dataset.simplified === 'true' && result.date && confirmed === result.date) output.textContent = 'Cocokkan tanggal dengan label asli.';
+            else if (this.form.dataset.simplified === 'true' && result.month && confirmed === result.month && this.field(`${field}_month`)) output.textContent = 'Label hanya memuat bulan dan tahun; hari tidak ditambahkan.';
+            else output.textContent = messages.join(' ');
+            output.classList.toggle('date-feedback-resolved', Boolean(confirmed && (confirmed === result.date || confirmed === result.month)));
         }
-        const warnings = dateOrderWarnings(this.field('mfg_date').value || this.field('mfg_month').value, this.field('exp_date').value || this.field('exp_month').value);
+        const warnings = dateOrderWarnings(this.field('mfg_date').value || this.field('mfg_month')?.value, this.field('exp_date').value || this.field('exp_month')?.value);
         const output = this.form.querySelector('#date-order-warning');
         output.textContent = warnings.join(' ');
         output.hidden = !warnings.length;
@@ -131,7 +152,7 @@ export class ItemForm {
             if (overwrite || !this.field('lot_number').value) this.field('lot_number').value = candidate.raw.slice(0, 255);
         } else {
             const prefix = field.toLowerCase();
-            if (overwrite || (!this.field(`${prefix}_raw`).value && !this.field(`${prefix}_date`).value && !this.field(`${prefix}_month`).value)) {
+            if (overwrite || (!this.field(`${prefix}_raw`).value && !this.field(`${prefix}_date`).value && !this.field(`${prefix}_month`)?.value)) {
                 this.field(`${prefix}_raw`).value = candidate.raw.slice(0, 255);
                 this.syncDate(prefix);
             }
@@ -164,9 +185,16 @@ export class ItemForm {
         });
         const countElement = document.querySelector('#candidate-count');
         if (countElement) countElement.textContent = `${count} kandidat`;
+        const options = document.querySelector('#candidate-options');
+        if (options) {
+            const multiple = Object.values(parsed.fields).some(candidates => candidates.length > 1);
+            options.hidden = count === 0;
+            options.open = multiple;
+        }
         const output = document.querySelector('#parser-warnings');
         output.replaceChildren();
-        [...parsed.warnings, ...(parsed.unassigned.length ? [`Belum ditetapkan ke field: ${parsed.unassigned.join(', ')}`] : [])].forEach(message => {
+        const inlineWarnings = this.form.dataset.simplified === 'true' ? Object.values(parsed.fields).flat().filter(candidate => candidate.date?.month && parsed.fields[candidate.field]?.length === 1 && this.field(`${candidate.field.toLowerCase()}_month`)).flatMap(candidate => candidate.date.warnings) : [];
+        [...parsed.warnings.filter(message => !inlineWarnings.includes(message)), ...(parsed.unassigned.length ? [`Belum ditetapkan ke field: ${parsed.unassigned.join(', ')}`] : [])].forEach(message => {
             const paragraph = document.createElement('p');
             paragraph.textContent = message;
             output.append(paragraph);
@@ -194,7 +222,7 @@ export class ItemForm {
         this.form.querySelector('#item-error').hidden = true;
         if (this.saveButton) this.saveButton.textContent = 'Simpan item';
         this.renderCandidates(parseLabel(''));
-        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`).value ? 'month' : 'day');
+        for (const field of ['mfg', 'exp']) this.setDatePrecision(field, this.field(`${field}_month`)?.value ? 'month' : 'day');
         this.updateDateFeedback();
         this.syncSave();
         this.onReset();

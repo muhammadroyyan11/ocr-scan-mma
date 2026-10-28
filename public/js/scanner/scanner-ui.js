@@ -19,7 +19,7 @@ function initializeScanner() {
     let cameraFailure = '';
     let loadingImage = false;
     let closing = false;
-    let cameraField = null;
+    let cameraField = 'AUTO';
     let imageField = 'AUTO';
     const fieldLabels = { AUTO: 'Otomatis', LOT: 'LOT', MFG: 'MG / MFG', EXP: 'Expired Date' };
     let savedCount = Number.parseInt(element('saved-count').textContent, 10) || 0;
@@ -49,7 +49,7 @@ function initializeScanner() {
     function showError(error) {
         element('scanner-error').textContent = error.message;
         element('scanner-error').hidden = false;
-        status('Error', 'error');
+        status('Ada kendala', 'error');
     }
 
     function updateControls() {
@@ -60,23 +60,29 @@ function initializeScanner() {
         element('camera-placeholder').hidden = state.running || hasImage;
         element('image-workspace').hidden = state.running || !hasImage;
         const cameraStatus = element('camera-status');
-        if (cameraStatus) cameraStatus.textContent = cameraLoading ? 'Membuka kamera: izinkan akses jika browser meminta. Tekan Hentikan untuk membatalkan.' : state.running ? cameraReady ? 'Kamera aktif. Arahkan ke label produk.' : 'Kamera terhubung. Menunggu gambar dari perangkat...' : cameraFailure || 'Kamera belum aktif. Tekan Mulai kamera atau Pilih foto.';
+        if (cameraStatus) cameraStatus.textContent = cameraLoading ? 'Izinkan kamera jika diminta. Tekan Hentikan untuk membatalkan.' : processing ? 'Sedang membaca label. Tunggu sebentar...' : state.running ? cameraReady ? 'Arahkan ke label, lalu tekan Scan label.' : 'Menunggu gambar dari kamera...' : cameraFailure || (hasImage ? 'Foto siap. Tekan Scan label untuk membaca.' : 'Pilih salah satu cara untuk mulai.');
         const busy = processing || cameraLoading || loadingImage || form.busy;
         for (const id of ['manual-crop', 'retake']) element(id).disabled = !hasImage || busy;
         element('auto-ocr').disabled = busy || (state.running ? !cameraReady : !hasImage);
         for (const id of ['clear-selection', 'crop-area', 'read-selected']) element(id).disabled = !hasImage || !cropper.selection || busy;
         element('start-camera').disabled = busy || state.running;
+        element('start-camera').hidden = state.running || hasImage;
+        element('auto-ocr').hidden = !state.running && !hasImage;
+        element('retake').hidden = !hasImage || state.running;
         element('stop-camera').disabled = !state.running && !cameraLoading;
+        element('stop-camera').hidden = !state.running && !cameraLoading;
         element('switch-camera').disabled = busy || !state.running || !state.canSwitch;
+        element('switch-camera').hidden = !state.running || !state.canSwitch;
         element('torch-camera').disabled = busy || !state.running || !state.canTorch;
+        element('torch-camera').hidden = !state.running || !state.canTorch;
         element('torch-camera').textContent = state.torch ? 'Matikan lampu' : 'Lampu';
         element('camera-field-picker').hidden = !state.running;
         element('camera-field-picker').querySelectorAll('input').forEach(control => { control.disabled = busy; });
-        element('camera-field-hint').textContent = cameraField === 'AUTO' ? 'Arahkan ke seluruh label, lalu tekan OCR otomatis untuk langsung memotret dan membaca. Hasilnya masuk ke field masing-masing; tanggal valid langsung mengisi kalender.' : cameraField ? `Arahkan kamera ke ${fieldLabels[cameraField]}, lalu tekan Baca ${fieldLabels[cameraField]}. Hasil OCR hanya mengisi field ini.` : 'Tekan OCR otomatis untuk langsung memotret dan membaca seluruh label, atau pilih LOT, MG / MFG, atau Expired Date untuk satu jenis data.';
+        element('camera-field-hint').textContent = cameraField && cameraField !== 'AUTO' ? `Arahkan ke ${fieldLabels[cameraField]}. Hasil hanya mengisi kolom ini.` : 'Otomatis membaca LOT, produksi, dan kedaluwarsa. Tidak perlu memilih satu per satu.';
         element('capture-image').disabled = busy || !cameraReady || !cameraField;
         element('capture-image').textContent = cameraField === 'AUTO' ? 'Ambil foto label' : cameraField ? `Ambil foto ${fieldLabels[cameraField]}` : 'Ambil foto';
         const readField = state.running ? cameraField ?? 'AUTO' : imageField;
-        element('auto-ocr').firstChild.textContent = readField === 'AUTO' ? 'OCR otomatis ' : `Baca ${fieldLabels[readField]} `;
+        element('auto-ocr').firstChild.textContent = processing ? 'Sedang membaca... ' : readField === 'AUTO' ? 'Scan label ' : `Baca ${fieldLabels[readField]} `;
         element('image-file').disabled = busy;
         element('next-item').disabled = busy;
         element('crop-field').disabled = busy;
@@ -97,9 +103,9 @@ function initializeScanner() {
         element('image-workspace').hidden = false;
         element('crop-preview').hidden = true;
         element('scanner-error').hidden = true;
-        status('Idle');
+        status('Foto siap');
         updateControls();
-        if (announce) notify(field === 'AUTO' ? 'Foto siap. Jalankan OCR otomatis atau pilih area tulisan.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]} atau pilih area tulisan.`);
+        if (announce) notify(field === 'AUTO' ? 'Foto siap. Tekan Scan label untuk membaca.' : `Foto ${fieldLabels[field]} siap. Tekan Baca ${fieldLabels[field]}.`);
     }
 
     async function startCamera(switching = false) {
@@ -229,6 +235,7 @@ function initializeScanner() {
         const targeted = selected || imageField !== 'AUTO';
         if (targeted && form.scans.length >= 30) { showError(new Error('Maksimal 30 catatan crop per item. Hapus catatan yang tidak diperlukan.')); return; }
         processing = true;
+        let completed = false;
         const wasCropEnabled = cropper.enabled;
         updateControls();
         camera.stop();
@@ -236,7 +243,7 @@ function initializeScanner() {
         element('image-workspace').hidden = false;
         element('scanner-error').hidden = true;
         element('ocr-progress').hidden = false;
-        status('Processing');
+        status('Membaca...');
         try {
             const crop = selected ? cropper.crop() : { canvas: element('captured-image'), metadata: null };
             const preset = element('preprocess-preset').value;
@@ -270,7 +277,10 @@ function initializeScanner() {
                 needsReview ||= !candidates.length || Object.values(parsed.fields).some(values => values.length > 1) || candidates.some(candidate => candidate.date && !candidate.date.date && !candidate.date.month);
             }
             form.markDirty();
-            status(needsReview ? 'Needs Review' : 'Success / Periksa hasil', needsReview ? 'amber' : 'green');
+            status(needsReview ? 'Perlu diperiksa' : 'Selesai', needsReview ? 'amber' : 'green');
+            const hint = element('scan-result-hint');
+            if (hint) hint.textContent = needsReview ? 'Periksa kolom yang belum terbaca. Anda bisa memperbaikinya manual atau foto ulang.' : 'Cocokkan LOT dan tanggal dengan label, lalu centang konfirmasi untuk menyimpan.';
+            completed = Boolean(result.text.trim());
             if (!result.text) notify('Belum ada teks terbaca. Coba area lebih dekat atau preset lain.', true);
         } catch (failure) { if (!closing) showError(failure); }
         finally {
@@ -279,6 +289,11 @@ function initializeScanner() {
             element('ocr-progress').hidden = true;
             updateControls();
         }
+        if (completed && !selected && !closing && window.matchMedia('(max-width: 1100px)').matches) {
+            const heading = element('scan-result-heading');
+            heading?.focus({ preventScroll: true });
+            heading?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        }
     }
 
     element('auto-ocr').addEventListener('click', () => recognize());
@@ -286,14 +301,16 @@ function initializeScanner() {
     form.onSaved = (result, wasNew) => {
         if (wasNew) savedCount += 1;
         element('saved-count').textContent = `${savedCount} item di sesi`;
+        const hint = element('scan-result-hint');
+        if (hint) hint.textContent = 'Item tersimpan. Tekan Scan item berikutnya untuk melanjutkan.';
         notify('Item tersimpan. Pilih Scan item berikutnya untuk melanjutkan.');
     };
     form.onBusy = () => updateControls();
     form.onReset = () => {
         camera.stop();
-        cameraField = null;
+        cameraField = 'AUTO';
         imageField = 'AUTO';
-        element('camera-field-picker').querySelectorAll('input').forEach(control => { control.checked = false; });
+        element('camera-field-picker').querySelectorAll('input').forEach(control => { control.checked = control.value === 'AUTO'; });
         element('crop-field').value = 'AUTO';
         hasImage = false;
         cropper.clear();
@@ -306,7 +323,10 @@ function initializeScanner() {
         element('image-workspace').hidden = true;
         element('camera-placeholder').hidden = false;
         element('scanner-error').hidden = true;
-        status('Idle');
+        root.querySelectorAll('details').forEach(details => { details.open = false; });
+        const hint = element('scan-result-hint');
+        if (hint) hint.textContent = 'Hasil akan terisi setelah scan. Anda juga bisa mengisinya manual.';
+        status('Siap');
         updateControls();
         element('scanner').scrollIntoView({ block: 'start', behavior: 'smooth' });
     };

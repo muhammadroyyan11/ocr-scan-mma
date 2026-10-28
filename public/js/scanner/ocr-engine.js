@@ -1,4 +1,4 @@
-import { detectSymbolLabels, isNumericDate } from './symbol-label-detector.js';
+import { dateAnchors, detectSymbolLabels } from './symbol-label-detector.js';
 import { parseLabel } from './lot-mfg-exp-parser.js';
 
 let libraryPromise = null;
@@ -74,7 +74,7 @@ export class OcrEngine {
             let words = ocrWords(result.data);
             const parsed = parseLabel(text);
             if (!selected && Object.values(parsed.fields).some(values => !values.length)) {
-                const anchors = words.filter(word => isNumericDate(word.text) && word.confidence >= 50);
+                const anchors = dateAnchors(words);
                 const bands = [];
                 for (const anchor of anchors) {
                     const height = anchor.bbox.y1 - anchor.bbox.y0;

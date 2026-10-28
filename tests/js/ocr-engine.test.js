@@ -130,3 +130,31 @@ test('recognition requests bounding boxes and preserves text without symbol evid
     assert.deepEqual(result.symbols, []);
     assert.equal(engine.busy, false);
 });
+
+test('automatic OCR rereads a split named date and maps its words back to the original image', async context => {
+    const { engine } = await environment(context);
+    const words = [
+        { text: '11', confidence: 95, bbox: { x0: 200, y0: 60, x1: 220, y1: 80 } },
+        { text: 'agustus', confidence: 95, bbox: { x0: 228, y0: 60, x1: 298, y1: 80 } },
+        { text: '2026', confidence: 95, bbox: { x0: 306, y0: 60, x1: 346, y1: 80 } },
+    ];
+    let calls = 0;
+    const draws = [];
+    document.createElement = () => ({ getContext: () => ({ drawImage: (...args) => draws.push(args) }) });
+    window.Tesseract = { createWorker: async () => ({
+        setParameters: async () => {},
+        recognize: async () => {
+            calls += 1;
+            const recognized = calls === 1 ? words : words.map(word => ({ ...word, bbox: { x0: word.bbox.x0 * 2, y0: (word.bbox.y0 - 36) * 2, x1: word.bbox.x1 * 2, y1: (word.bbox.y1 - 36) * 2 } }));
+            return { data: { text: '11 agustus 2026', confidence: 95, blocks: [{ paragraphs: [{ lines: [{ words: recognized }] }] }] } };
+        },
+    }) };
+    const canvas = { width: 600, height: 200, getContext: () => ({ getImageData: (left, top, width, height) => ({ data: new Uint8ClampedArray(width * height * 4).fill(255) }) }) };
+    const result = await engine.recognize(canvas);
+    assert.equal(calls, 2);
+    assert.equal(draws.length, 1);
+    assert.deepEqual(draws[0], [canvas, 0, 36, 600, 68, 0, 0, 1200, 136]);
+    assert.deepEqual(result.words, words);
+    assert.deepEqual(result.symbols, []);
+    assert.equal(engine.busy, false);
+});

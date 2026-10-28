@@ -1,3 +1,48 @@
+#scanner { --scan-soft: #f5f8ef; --scan-border: #dce5d5; }
+#scanner .muted { color: #5d7064; }
+#scanner .panel-heading h2 { font-size: 18px; }
+.scan-step { display: inline-grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; background: var(--ink); color: var(--lime); font-size: 13px; }
+#scanner .camera-explanation { margin-bottom: 16px; line-height: 1.6; }
+#scanner .camera-placeholder strong { font-size: 16px; }
+#scanner .camera-placeholder p { font-size: 12px; }
+#scanner #camera-status { margin-top: 14px; font-size: 13px; }
+.scan-main-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 14px; }
+#scanner .scan-main-actions .button { min-height: 50px; font-size: 14px; padding: 12px 18px; }
+#scanner .upload-button:focus-within { outline: 3px solid #8aa843; outline-offset: 3px; }
+#scanner .upload-button input.sr-only { min-height: 1px; }
+#scanner .camera-controls { gap: 4px; margin-top: 8px; }
+#scanner .camera-controls .button { font-size: 12px; padding: 8px 12px; }
+#scanner .scanner-left { display: flex; flex-direction: column; }
+#scanner .scan-disclosure { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #fbfcf9; padding: 0 18px; }
+#scanner .scan-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 65px; padding: 12px 0; list-style: none; color: var(--ink); font-size: 13px; font-weight: 700; }
+#scanner .scan-disclosure > summary::-webkit-details-marker { display: none; }
+#scanner .scan-disclosure > summary small { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: #5d7064; }
+#scanner .scan-disclosure[open] > summary { margin-bottom: 0; border-bottom: 1px solid var(--line); }
+.disclosure-plus { display: inline-grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border: 1px solid var(--scan-border); border-radius: 50%; font-size: 18px; font-weight: 400; transition: transform .15s; }
+.scan-disclosure[open] > summary .disclosure-plus { transform: rotate(45deg); }
+.scan-disclosure-body { padding: 18px 0; }
+#scanner .scan-disclosure-body h3 { font-size: 14px; }
+#scanner .scan-disclosure-body .ocr-toolbar { margin-top: 0; }
+#scanner .scan-disclosure-body select { font-size: 16px; }
+#scanner .scan-candidates { margin-bottom: 18px; }
+#scanner .scan-candidates > summary { min-height: 50px; }
+#scanner .parser-warnings:empty { display: none; }
+#scanner .parser-warnings:not(:empty) { margin-bottom: 16px; }
+#scanner .results-panel > p { font-size: 13px; margin-bottom: 18px; }
+#scanner .date-field { background: var(--scan-soft); border-color: var(--scan-border); }
+#scanner .field-section-heading { font-size: 13px; margin-bottom: 2px; }
+#scanner .date-field .text-button { font-size: 11px; color: #526746; }
+#scanner .date-field > label { font-size: 12px; }
+#scanner .date-field > details { border-top: 1px solid var(--scan-border); }
+#scanner .date-field summary { font-size: 12px; }
+#scanner .date-field > details > label { margin: 10px 0 16px; }
+#scanner .date-feedback { font-size: 12px; }
+#scanner .date-feedback-resolved { color: #5d7064; }
+#scanner .confirmation strong { font-size: 13px; }
+#scanner .confirmation small { font-size: 11px; }
+#scanner #save-item { min-height: 50px; font-size: 14px; }
+#scan-result-heading { scroll-margin-top: 20px; }
+.scanner-heading .eyebrow { max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .camera-field-picker {
     padding: 14px;
     color: #eef4e7;
@@ -14,6 +59,21 @@
 .camera-field-options input:focus-visible + span { outline: 2px solid #eef4e7; outline-offset: 3px; }
 .camera-field-options input:disabled + span { opacity: .5; cursor: not-allowed; }
 .camera-field-picker p { margin: 10px 0 0; font-size: 11px; line-height: 1.5; }
+#scanner .camera-field-picker { border: 0; border-radius: 10px; }
+#scanner .camera-field-picker .button { margin-top: 12px; }
 @media (max-width: 640px) {
+    .scanner-heading > a.button { align-self: flex-start; width: auto; min-height: 36px; padding: 4px 0; background: transparent; border-color: transparent; font-size: 12px; }
     .camera-field-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #scanner .camera-placeholder { min-height: 215px; padding: 20px; }
+    #scanner .camera-placeholder .viewfinder { width: 64px; height: 64px; }
+    #scanner .panel-heading { flex-wrap: wrap; gap: 10px; }
+    #scanner .panel-heading h2 { font-size: 16px; }
+    #scanner .panel-heading .badge { font-size: 10px; }
+    #scanner .scan-main-actions .button { padding: 12px; font-size: 13px; }
+    #scanner .date-options { grid-template-columns: minmax(0, 1fr); }
+    #scanner .date-options .button { grid-column: auto; }
+    #scanner #item-form > fieldset { gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .disclosure-plus { transition: none; }
 }

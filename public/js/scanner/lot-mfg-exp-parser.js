@@ -73,7 +73,7 @@ export function parseDate(raw, { format = '', century = null, suggestCorrections
         }
         result.month = `${year}-${String(month).padStart(2, '0')}`;
         result.status = 'incomplete';
-        result.warnings.push('Label hanya memiliki bulan dan tahun. Disimpan sebagai bulan/tahun tanpa menambahkan hari.');
+        result.warnings.push('Label hanya memiliki bulan dan tahun. Hari tidak ditentukan; gunakan input bulan/tahun tanpa menambahkan hari.');
         return result;
     }
     if (result.candidates.length === 1) {

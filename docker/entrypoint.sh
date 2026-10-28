@@ -9,5 +9,6 @@ until php -r 'try { new PDO("mysql:host=".getenv("DB_HOST").";port=".getenv("DB_
     sleep 2
 done
 php artisan migrate --force
+php artisan view:clear
 php artisan scanner:bootstrap-admin
 exec docker-php-entrypoint "$@"

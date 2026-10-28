@@ -1,17 +1,29 @@
 @php($editing = isset($item))
-<form id="item-form" class="stack" data-item-id="{{ $item->id ?? '' }}" data-session-id="{{ $session->id ?? $item->receiving_session_id }}">
+@php($simplified = $simplified ?? false)
+<form id="item-form" class="stack" data-simplified="{{ $simplified ? 'true' : 'false' }}" data-item-id="{{ $item->id ?? '' }}" data-session-id="{{ $session->id ?? $item->receiving_session_id }}">
 <fieldset class="stack" @if($editing && !auth()->user()->can('update', $item)) disabled @endif>
+@unless($simplified)
 <div class="form-grid"><label>Nama produk <span class="optional">opsional</span><input name="product_name" value="{{ $item->product_name ?? '' }}" maxlength="255" placeholder="Nama produk"></label><label>Referensi produk <span class="optional">opsional</span><input name="product_reference" value="{{ $item->product_reference ?? '' }}" maxlength="255" placeholder="SKU / kode produk"></label></div>
 <div class="form-grid"><label>Barcode <span class="optional">opsional</span><input name="barcode" value="{{ $item->barcode ?? '' }}" maxlength="255" placeholder="Kode barcode" inputmode="numeric"></label><label>LOT Number <span class="optional">opsional</span><input name="lot_number" value="{{ $item->lot_number ?? '' }}" maxlength="255" placeholder="Kode lot / batch (boleh kosong)" class="mono"></label></div>
+@else
+<label>Nomor LOT / batch <span class="optional">Boleh kosong jika tidak ada</span><input name="lot_number" value="{{ $item->lot_number ?? '' }}" maxlength="255" placeholder="Nomor lot pada label" class="mono"></label>
+@endunless
 @foreach(['mfg' => 'MG / MFG - Produksi', 'exp' => 'ED / EXP - Kedaluwarsa'] as $field => $label)
 <section class="date-field">
-<div class="field-section-heading"><strong>{{ $label }}</strong><button type="button" class="text-button" data-clear-field="{{ $field }}">Kosongkan</button></div>
+<div class="field-section-heading"><strong>{{ $simplified ? ($field === 'mfg' ? 'Produksi (MFG)' : 'Kedaluwarsa (EXP)') : $label }}</strong><button type="button" class="text-button" data-clear-field="{{ $field }}">Kosongkan</button></div>
+@unless($simplified)
 <label>Ketelitian {{ strtoupper($field) }}<select data-date-precision="{{ $field }}"><option value="day">Tanggal lengkap</option><option value="month" @selected(filled($item?->{$field.'_month'}))>Bulan dan tahun saja</option></select></label>
-<label data-date-day="{{ $field }}" @if(filled($item?->{$field.'_month'})) hidden @endif>Tanggal {{ strtoupper($field) }}<input type="date" name="{{ $field }}_date" value="{{ $item?->{$field.'_date'}?->format('Y-m-d') ?? '' }}" min="1000-01-01" max="9999-12-31"></label>
-<label data-date-month="{{ $field }}" @unless(filled($item?->{$field.'_month'})) hidden @endunless>Bulan/tahun {{ strtoupper($field) }}<input type="month" name="{{ $field }}_month" value="{{ $item?->{$field.'_month'} ?? '' }}" min="1000-01" max="9999-12" pattern="[0-9]{4}-(0[1-9]|1[0-2])" placeholder="YYYY-MM"></label>
-<p class="muted">Terisi otomatis dari hasil scan yang tidak ambigu. Tetap cocokkan dengan label asli.</p>
+@endunless
+<label data-date-day="{{ $field }}" @if(filled($item?->{$field.'_month'})) hidden @endif><span @class(['sr-only' => $simplified])>Tanggal {{ strtoupper($field) }}</span><input type="date" name="{{ $field }}_date" value="{{ $item?->{$field.'_date'}?->format('Y-m-d') ?? '' }}" min="1000-01-01" max="9999-12-31"></label>
+<label data-date-month="{{ $field }}" @unless(filled($item?->{$field.'_month'})) hidden @endunless><span @class(['sr-only' => $simplified])>Bulan/tahun {{ strtoupper($field) }}</span><input type="month" name="{{ $field }}_month" value="{{ $item?->{$field.'_month'} ?? '' }}" min="1000-01" max="9999-12" pattern="[0-9]{4}-(0[1-9]|1[0-2])" placeholder="YYYY-MM"></label>
+@unless($simplified)<p class="muted">Terisi otomatis dari hasil scan yang tidak ambigu. Tetap cocokkan dengan label asli.</p>@endunless
+@if($simplified)
+<details data-date-options="{{ $field }}"><summary>Ubah format atau lihat teks asli</summary>
+<label>Ketelitian {{ strtoupper($field) }}<select data-date-precision="{{ $field }}"><option value="day">Tanggal lengkap</option><option value="month" @selected(filled($item?->{$field.'_month'}))>Bulan dan tahun saja</option></select></label>
+@endif
 <details data-date-source="{{ $field }}"><summary>Teks asli hasil scan {{ strtoupper($field) }}</summary><label>Teks mentah {{ strtoupper($field) }}<input name="{{ $field }}_raw" value="{{ $item?->{$field.'_raw'} ?? '' }}" maxlength="255" placeholder="Contoh: 26.08.11 / 11 agustus 2026 / 11 aug 2026"></label></details>
-<details data-date-options="{{ $field }}"><summary>Interpretasi kode tanggal</summary><div class="date-options"><label>Format<select data-date-format="{{ $field }}"><option value="">Deteksi aman (tanpa asumsi)</option>
+@unless($simplified)<details data-date-options="{{ $field }}"><summary>Interpretasi kode tanggal</summary>@endunless
+<div class="date-options"><label>Format<select data-date-format="{{ $field }}"><option value="">Deteksi aman (tanpa asumsi)</option>
 @foreach(['YYYY-MM-DD' => 'YYYY-MM-DD / YYYY.MM.DD', 'DD/MM/YYYY' => 'DD/MM/YYYY / DD.MM.YYYY', 'MM/DD/YYYY' => 'MM/DD/YYYY / MM.DD.YYYY', 'YY.MM.DD' => 'YY.MM.DD / YY-MM-DD / YY/MM/DD', 'DD.MM.YY' => 'DD.MM.YY / DD-MM-YY / DD/MM/YY', 'MM.DD.YY' => 'MM.DD.YY / MM-DD-YY / MM/DD/YY', 'DDMMYYYY' => 'DDMMYYYY', 'YYYYMMDD' => 'YYYYMMDD', 'YYMMDD' => 'YYMMDD', 'DDMMYY' => 'DDMMYY'] as $format => $description)
 <option value="{{ $format }}">{{ $description }}</option>
 @endforeach
@@ -19,11 +31,17 @@
 <div class="date-feedback" data-date-feedback="{{ $field }}" aria-live="polite"></div>
 </section>
 @endforeach
+@if($simplified)
+<details class="scan-disclosure" id="item-details"><summary><span>Informasi tambahan<small>Nama produk, catatan, dan teks hasil baca</small></span><span class="disclosure-plus" aria-hidden="true">+</span></summary><div class="scan-disclosure-body stack">
+<div class="form-grid"><label>Nama produk <span class="optional">opsional</span><input name="product_name" value="{{ $item->product_name ?? '' }}" maxlength="255" placeholder="Nama produk"></label><label>Referensi produk <span class="optional">opsional</span><input name="product_reference" value="{{ $item->product_reference ?? '' }}" maxlength="255" placeholder="SKU / kode produk"></label></div>
+<label>Barcode <span class="optional">opsional</span><input name="barcode" value="{{ $item->barcode ?? '' }}" maxlength="255" placeholder="Kode barcode" inputmode="numeric"></label>
+@endif
 <label>Teks OCR mentah<textarea name="ocr_raw_text" rows="4" maxlength="20000" placeholder="Hasil pembacaan OCR; Anda juga dapat menempelkan teks label di sini">{{ $item->ocr_raw_text ?? '' }}</textarea></label><div class="button-row"><button type="button" class="button secondary" id="parse-text">Analisis teks</button><button type="button" class="button subtle" id="clear-fields">Kosongkan semua field</button></div>
 <div class="form-grid"><label>Keyakinan OCR (%)<input name="ocr_confidence" type="number" min="0" max="100" step="0.01" value="{{ $item->ocr_confidence ?? '' }}" placeholder="Tidak tersedia"></label><label>Status verifikasi<select name="verification_status"><option value="needs_review" @selected(($item->verification_status ?? '') !== 'verified')>Perlu diperiksa</option><option value="verified" @selected(($item->verification_status ?? '') === 'verified')>Terverifikasi oleh pengguna</option></select></label></div>
 <label>Catatan<textarea name="notes" rows="2" maxlength="5000" placeholder="Kondisi kemasan, informasi tambahan, atau alasan perlu verifikasi">{{ $item->notes ?? '' }}</textarea></label>
+@if($simplified)</div></details>@endif
 <div id="date-order-warning" class="notice warning" hidden></div>
-<label class="confirmation"><input type="checkbox" id="confirm-scan" name="confirmed" required><span><strong>Saya sudah memeriksa hasil scan.</strong><small>Konfirmasikan LOT dan interpretasi tanggal dengan label asli. OCR bukan jaminan keamanan produk.</small></span></label>
+<label class="confirmation"><input type="checkbox" id="confirm-scan" name="confirmed" required><span><strong>Saya sudah memeriksa hasil scan.</strong><small>{{ $simplified ? 'Hasil baca bisa keliru. Cocokkan dengan label sebelum menyimpan.' : 'Konfirmasikan LOT dan interpretasi tanggal dengan label asli. OCR bukan jaminan keamanan produk.' }}</small></span></label>
 <div id="item-error" class="notice error" hidden role="alert"></div><div id="item-success" class="notice success" hidden role="status"></div>
 @if(!$editing || auth()->user()->can('update', $item))<div class="button-row"><button type="submit" class="button primary grow" id="save-item" disabled>@include('partials.icon', ['name' => 'check']) {{ $editing ? 'Simpan perubahan' : 'Simpan item' }}</button>@if(!$editing)<button type="button" class="button secondary" id="next-item">Scan item berikutnya</button>@endif</div>@else<p class="notice">Mode baca-saja. Role Anda atau status sesi tidak mengizinkan perubahan.</p>@endif
 </fieldset>

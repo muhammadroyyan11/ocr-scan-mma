@@ -106,16 +106,21 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
 ## Alur Pemakaian
 
 1. Buat sesi penerimaan; supplier, referensi, kode gudang, dan catatan opsional.
-2. Pilih **Mulai kamera**, izinkan akses, arahkan ke label, lalu tekan **OCR otomatis**.
+2. Tampilan utama berisi dua langkah: **Foto label** dan **Periksa & simpan**.
+   Hanya LOT, tanggal produksi, dan kedaluwarsa yang ditampilkan; semua boleh dikosongkan jika tidak ada pada label.
+   Pilih **Mulai kamera**, izinkan akses, arahkan ke label, lalu tekan **Scan label**.
    Tombol aktif setelah preview kamera siap; satu klik mengambil foto dan membaca LOT/MG/ED sekaligus.
-   Tidak perlu menekan **Ambil foto** terlebih dahulu. Tanpa pilihan jenis, pembacaan memakai mode Otomatis.
-   Untuk satu field, pilih **LOT**, **MG / MFG** (tanggal produksi), atau **Expired Date** di kamera,
+   Tidak perlu menekan **Ambil foto** atau memilih jenis data terlebih dahulu. Mode Otomatis menjadi pilihan awal.
+   Untuk satu field, buka **Alat bantu scan**, pilih **LOT**, **MG / MFG** (tanggal produksi), atau **Expired Date**,
    lalu tekan **Baca LOT / MG / MFG / Expired Date** untuk langsung memotret dan membaca field tersebut.
-   **Ambil foto** tetap tersedia jika ingin memeriksa foto sebelum menjalankan OCR; tombol ini memerlukan pilihan jenis.
+   **Ambil foto**, pengaturan tampilan foto, dan pemilihan area tetap tersedia di **Alat bantu scan**.
    Mode **Otomatis** mengenali penanda LOT/BATCH, MG/MFG/MFD, serta ED/EXP dan mengisi field masing-masing.
    Tanggal valid langsung mengisi input kalender MG dan ED; teks asli tersimpan di bagian yang dapat dibuka.
    Label dengan simbol pabrik dan jam pasir juga dibaca dari bentuk simbol serta posisi tanggal di sebelah kanannya,
-   bukan dari urutan tanggal atau perkiraan masa berlaku. OCR mengulang pembacaan baris tanggal hingga dua baris
+   tanpa harus ada tulisan MFG/EXP. Tanggal dapat berupa satu token, terpisah oleh spasi seperti `2026 - 08 - 11`,
+   memakai nama bulan seperti `11 agustus 2026`, atau hanya bulan/tahun seperti `08/2031` / `AUG 2031`.
+   Ikon harus berada pada baris tanggal yang sama; sistem tidak menetapkan jenis dari urutan tanggal atau perkiraan masa berlaku.
+   OCR mengulang pembacaan baris tanggal hingga dua baris
    jika pembacaan seluruh foto belum lengkap. Pengenalan memakai pencocokan bentuk lokal di browser, bukan layanan AI server;
    simbol buram, terlalu miring, atau berbeda bentuk mungkin perlu crop/pilihan field manual.
    Contoh `26.08.11` masuk sebagai kandidat MG; pilih format `YY.MM.DD` dan abad `2000-2099` setelah memeriksa label
@@ -132,15 +137,17 @@ minimal satu admin aktif dipertahankan. Password minimum 12 karakter dengan huru
    menutup stream jika ditolak atau belum selesai. Status izin/error tampil di dekat tombol kamera.
    Permintaan izin yang belum dijawab dapat dibatalkan lewat **Hentikan**; stream yang datang terlambat langsung ditutup.
    Modul OCR dimuat saat tombol baca ditekan, sehingga aset OCR yang hilang tidak memblokir kamera.
-4. Untuk foto dari perangkat, jalankan **OCR otomatis** untuk seluruh foto. Teks mentah, kandidat LOT/MFG/EXP,
-   dan confidence OCR ditampilkan. Keyword tidak bergantung pada posisi/urutan label.
-5. Jika perlu, tekan **Pilih area**, tarik kotak dengan mouse/satu jari pada foto.
+4. Untuk foto dari perangkat, tekan **Scan label** untuk seluruh foto. Di HP, tampilan berpindah ke hasil setelah pembacaan selesai.
+   Buka **Informasi tambahan** untuk nama produk, barcode, catatan, teks mentah, confidence, dan analisis teks.
+   **Pilihan hasil baca lainnya** menyediakan kandidat; bagian ini terbuka otomatis jika satu field memiliki beberapa kandidat.
+   Keyword tidak bergantung pada posisi/urutan label. Format tanggal dan teks aslinya ada pada **Ubah format atau lihat teks asli**.
+5. Jika perlu, buka **Alat bantu scan**, tekan **Pilih area**, lalu tarik kotak dengan mouse/satu jari pada foto.
    **Preview crop** menampilkan crop + preset; **Baca area terpilih** menjalankan OCR crop.
    Jenis field dapat dipilih LOT/MFG/EXP/OTHER atau dideteksi dari keyword.
 6. Setiap pembacaan crop menambah kartu baru (maksimal 30). Kartu memiliki preview,
    teks OCR asli, teks koreksi, jenis field, Terapkan ke field, dan Hapus catatan crop.
    Membuat seleksi baru atau Foto ulang tidak menghapus kartu sebelumnya dalam item yang sama.
-7. Edit form. Gunakan **Analisis teks** untuk parsing ulang; OCR otomatis dapat ditekan
+7. Periksa form, centang konfirmasi, lalu tekan **Simpan item**. Gunakan **Analisis teks** di **Informasi tambahan** untuk parsing ulang; **Scan label** dapat ditekan
    kembali untuk membaca ulang. Kandidat tunggal mengisi field kosong saja; klik kandidat
    untuk mengganti field secara eksplisit. Tidak ada koreksi LOT O/0, I/1, S/5, B/8 otomatis.
 8. Pilih status verifikasi, centang **Saya sudah memeriksa hasil scan**, lalu **Simpan item**.
@@ -355,6 +362,12 @@ menggunakannya untuk pemulihan. Database tidak hilang setelah restart/rebuild se
 
 ## Troubleshooting
 
+- **`item-form.js` membaca `.value` dari null / kamera tidak bereaksi setelah deploy:** HTML Blade dan JavaScript
+  dapat berbeda versi jika hanya satu image di-rebuild atau compiled view lama masih tersimpan di volume storage.
+  Rebuild **app dan web**, jalankan `docker compose exec --user www-data app php artisan view:clear`, lalu muat ulang halaman.
+  Entrypoint sekarang membersihkan compiled view saat app dimulai, dan JavaScript aplikasi selalu direvalidasi browser.
+  JavaScript tetap dapat menjalankan kamera dan tanggal lengkap pada form lama tanpa kontrol bulan/tahun;
+  tanggal bulanan dipertahankan sebagai teks mentah dan perlu review sampai HTML baru tersedia, bukan diberi hari buatan.
 - **Port terpakai:** `ss -ltnp | grep ':8092'`; jangan hentikan service proyek lain.
   Ubah APP_PORT dan APP_URL jika secara sadar membutuhkan port lain.
 - **DB belum siap / app restart:** lihat `docker compose logs db app`; periksa password,
